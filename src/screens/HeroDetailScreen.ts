@@ -2,9 +2,10 @@ import blessed from 'blessed';
 import { BaseScreen } from './BaseScreen.ts';
 import type { GameStore } from '../state/GameStore.ts';
 import type { Hero } from '../models/types.ts';
-import { getClassName, RECOMMENDED_POSITIONS, getStars } from '../data/heroes.ts';
+import { getClassName, RECOMMENDED_POSITIONS, getStars, CLASS_DESCRIPTIONS } from '../data/heroes.ts';
 import { HERO_ART } from '../data/ascii-art.ts';
 import { formatBar } from '../utils/helpers.ts';
+import { getTraitCategoryColor } from '../data/traits.ts';
 
 export class HeroDetailScreen extends BaseScreen {
   private actionList!: blessed.Widgets.ListElement;
@@ -118,7 +119,7 @@ export class HeroDetailScreen extends BaseScreen {
       this.handleAction(index, hero);
     });
 
-    this.screen.key(['escape'], () => {
+    this.registerKey(['escape'], () => {
       this.store.dispatch({ type: 'NAVIGATE', screen: 'town' });
     });
 
@@ -128,19 +129,18 @@ export class HeroDetailScreen extends BaseScreen {
 
   private buildStatsContent(hero: Hero): string {
     const hpBar = formatBar(hero.stats.hp, hero.stats.maxHp, 14);
-    const stressBar = formatBar(hero.stats.stress, 100, 14);
     const hpColor = hero.stats.hp / hero.stats.maxHp > 0.5 ? 'green' : hero.stats.hp / hero.stats.maxHp > 0.25 ? 'yellow' : 'red';
-    const stressColor = hero.stats.stress >= 100 ? 'red' : hero.stats.stress >= 50 ? 'yellow' : 'gray';
 
     const rec = RECOMMENDED_POSITIONS[hero.class];
-    const posWarning = hero.position > 0 && !rec.positions.includes(hero.position)
-      ? `{yellow-fg}! 현재 위치(${hero.position})가 비추천{/yellow-fg}`
+    const posWarning = hero.position.col > 0 && !rec.cols.includes(hero.position.col)
+      ? `{yellow-fg}! 현재 열(${hero.position.col})이 비추천{/yellow-fg}`
       : '';
 
     let content = '';
     const mcTag = hero.isMainCharacter ? '{bold}{yellow-fg}[주인공]{/yellow-fg}{/bold}\n' : '';
     const maxLevel = hero.isMainCharacter ? 10 : 5;
     content += mcTag;
+    content += `{gray-fg}${CLASS_DESCRIPTIONS[hero.class]}{/gray-fg}\n`;
     content += `{bold}레어도:{/bold} {yellow-fg}${getStars(hero.rarity)}{/yellow-fg}\n`;
     content += `{bold}레벨:{/bold} ${hero.level}/${maxLevel}\n`;
     if (hero.isMainCharacter && hero.statPoints > 0) {
@@ -151,8 +151,6 @@ export class HeroDetailScreen extends BaseScreen {
     content += `\n`;
     content += `{bold}HP{/bold}  {${hpColor}-fg}${hpBar}{/${hpColor}-fg}\n`;
     content += `     ${hero.stats.hp} / ${hero.stats.maxHp}\n`;
-    content += `{bold}ST{/bold}  {${stressColor}-fg}${stressBar}{/${stressColor}-fg}\n`;
-    content += `     ${hero.stats.stress} / 100\n`;
     const expBar = formatBar(hero.exp, hero.expToLevel, 14);
     const canLvUp = hero.exp >= hero.expToLevel && hero.level < maxLevel;
     const expLabel = canLvUp ? ' {green-fg}[레벨업 가능!]{/green-fg}' : '';
@@ -165,11 +163,13 @@ export class HeroDetailScreen extends BaseScreen {
     content += `{white-fg}회  피:{/white-fg}  ${hero.stats.dodge}\n`;
     content += `{white-fg}치명타:{/white-fg}  ${hero.stats.crit}%\n`;
 
-    if (hero.affliction) {
-      content += `\n{red-fg}고뇌: ${hero.affliction}{/red-fg}\n`;
-    }
-    if (hero.virtue) {
-      content += `\n{green-fg}미덕: ${hero.virtue}{/green-fg}\n`;
+    // Traits
+    if (hero.traits && hero.traits.length > 0) {
+      content += `\n{bold}특성:{/bold}\n`;
+      for (const trait of hero.traits) {
+        const color = getTraitCategoryColor(trait.category);
+        content += `  {${color}-fg}${trait.name}{/${color}-fg} {gray-fg}${trait.description}{/gray-fg}\n`;
+      }
     }
 
     return content;
@@ -187,24 +187,21 @@ export class HeroDetailScreen extends BaseScreen {
   private buildSkillsContent(hero: Hero): string {
     let content = '';
     for (const skill of hero.skills) {
-      const canUseFromPos = hero.position > 0 ? skill.usePositions.includes(hero.position) : true;
+      const canUseFromPos = hero.position.col > 0 ? skill.useCols.includes(hero.position.col) : true;
       const posColor = canUseFromPos ? 'green' : 'red';
       content += `{bold}{yellow-fg}${skill.name}{/yellow-fg}{/bold}\n`;
       content += `{gray-fg}${skill.description}{/gray-fg}\n`;
-      content += `{${posColor}-fg}사용: [${skill.usePositions.join(',')}]{/${posColor}-fg}`;
+      content += `{${posColor}-fg}사용: [${skill.useCols.join(',')}]{/${posColor}-fg}`;
       if (skill.targetAlly) {
         content += ` 대상: 아군\n`;
       } else {
-        content += ` 대상: [${skill.targetPositions.join(',')}]\n`;
+        content += ` 대상: [${skill.targetCols.join(',')}]\n`;
       }
       if (skill.damage.max > 0) {
         content += `DMG: ${skill.damage.min}-${skill.damage.max}x `;
       }
       if (skill.heal) {
         content += `힐: ${skill.heal.min}-${skill.heal.max} `;
-      }
-      if (skill.stressHeal) {
-        content += `스트레스 힐: ${skill.stressHeal} `;
       }
       content += `\n\n`;
     }

@@ -1,6 +1,5 @@
 import type { CombatState, Monster, Hero, StatusEffect, GridPosition } from '../models/types.ts';
 import { percentChance, randomInt, randomChoice } from '../utils/helpers.ts';
-import { applyStress } from './stress-engine.ts';
 import { findEmptyGridCell, gridPosEqual } from '../utils/grid.ts';
 
 interface BossPatternResult {
@@ -106,7 +105,6 @@ function necromancerPattern(combat: CombatState, monster: Monster): BossPatternR
     size: 'small',
     statusEffects: [],
     isBoss: false,
-    stressDamage: 5,
   };
 
   const newMonsters = [...combat.monsters, summon];
@@ -188,7 +186,7 @@ function frostTitanPattern(combat: CombatState, monster: Monster): BossPatternRe
   };
 }
 
-// flame_demon: every turn => random hero bleed(2, 3 turns) + all stress +3
+// flame_demon: every turn => random hero bleed(2, 3 turns)
 function flameDemonPattern(combat: CombatState, monster: Monster): BossPatternResult | null {
   const log: string[] = [];
   const aliveHeroes = combat.heroes.filter(h => h.stats.hp > 0 || h.isDeathsDoor);
@@ -197,7 +195,7 @@ function flameDemonPattern(combat: CombatState, monster: Monster): BossPatternRe
   const target = randomChoice(aliveHeroes);
   log.push(`{bold}{red-fg}${monster.name}의 화염이 ${target.name}을(를) 감쌌다!{/red-fg}{/bold}`);
 
-  let newHeroes = combat.heroes.map(h => {
+  const newHeroes = combat.heroes.map(h => {
     if (h.id === target.id) {
       // Remove existing bleed from this source, then add fresh
       const filtered = h.statusEffects.filter(e => !(e.type === 'bleed' && e.source === '화염의 쇄도'));
@@ -212,14 +210,6 @@ function flameDemonPattern(combat: CombatState, monster: Monster): BossPatternRe
   });
 
   log.push(`${target.name}에게 출혈 효과!`);
-
-  // All heroes +3 stress
-  newHeroes = newHeroes.map(h => {
-    if (h.stats.hp <= 0 && !h.isDeathsDoor) return h;
-    const result = applyStress(h, 3);
-    log.push(...result.log);
-    return result.hero;
-  });
 
   return {
     combat: { ...combat, heroes: newHeroes },
@@ -254,16 +244,8 @@ function voidLordPattern(combat: CombatState, monster: Monster): BossPatternResu
     };
   });
 
-  // Stress +10 to all heroes
-  const newHeroes = combat.heroes.map(h => {
-    if (h.stats.hp <= 0 && !h.isDeathsDoor) return h;
-    const result = applyStress(h, 10);
-    log.push(...result.log);
-    return result.hero;
-  });
-
   return {
-    combat: { ...combat, monsters: newMonsters, heroes: newHeroes },
+    combat: { ...combat, monsters: newMonsters },
     log,
     skipNormalAction: true,
   };

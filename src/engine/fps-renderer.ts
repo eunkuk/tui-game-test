@@ -37,7 +37,7 @@ function getWallPalette(tc: ThemeConfig): WallPalette {
   const nearB = parseInt(hex.slice(5, 7), 16);
   return {
     nearR, nearG, nearB,
-    farR: 0x0c, farG: 0x0a, farB: 0x0a,
+    farR: 0x1a, farG: 0x18, farB: 0x18,
   };
 }
 
@@ -99,9 +99,9 @@ export function renderFPS(
   const ceilBotR = 0x3a, ceilBotG = 0x4a, ceilBotB = 0x7a;
 
   // 바닥 그래디언트 색상 (벽 경계 → 맨 아래)
-  // top: #3a3020, bottom: #8a7a5a
-  const floorTopR = 0x3a, floorTopG = 0x30, floorTopB = 0x20;
-  const floorBotR = 0x8a, floorBotG = 0x7a, floorBotB = 0x5a;
+  // top: #4a4030, bottom: #aa9a70
+  const floorTopR = 0x4a, floorTopG = 0x40, floorTopB = 0x30;
+  const floorBotR = 0xaa, floorBotG = 0x9a, floorBotB = 0x70;
 
   for (let row = 0; row < viewHeight; row++) {
     let line = '';
@@ -120,11 +120,20 @@ export function renderFPS(
         const c = lerpColor(ceilTopR, ceilTopG, ceilTopB, ceilBotR, ceilBotG, ceilBotB, t);
         line += `{${c}-fg}\u2588{/${c}-fg}`;
       } else if (row >= wallBot) {
-        // 바닥
+        // 바닥 (체크보드 패턴)
         const floorRows = viewHeight - wallBot;
         const maxFloor = Math.max(floorRows, 1);
         const t = (row - wallBot) / maxFloor;
-        const c = lerpColor(floorTopR, floorTopG, floorTopB, floorBotR, floorBotG, floorBotB, t);
+        let fR = lerp(floorTopR, floorBotR, t);
+        let fG = lerp(floorTopG, floorBotG, t);
+        let fB = lerp(floorTopB, floorBotB, t);
+        // 체크보드: (col + row) % 2 에 따라 밝기 변화
+        if ((col + row) % 2 === 0) {
+          fR *= 1.10; fG *= 1.10; fB *= 1.10;
+        } else {
+          fR *= 0.95; fG *= 0.95; fB *= 0.95;
+        }
+        const c = rgb(fR, fG, fB);
         line += `{${c}-fg}\u2588{/${c}-fg}`;
       } else {
         // 벽

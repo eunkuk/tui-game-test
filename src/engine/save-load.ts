@@ -1,9 +1,12 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import type { GameState } from '../models/types.ts';
+import type { GameState, PrestigeState } from '../models/types.ts';
+import { migrateOldPosition } from '../utils/grid.ts';
+import { HERO_SKILLS } from '../data/skills.ts';
 
 const SAVE_DIR = join(process.cwd(), 'saves');
 const SAVE_FILE = join(SAVE_DIR, 'save.json');
+const PRESTIGE_FILE = join(SAVE_DIR, 'prestige.json');
 
 // Prepare state for serialization by stripping non-serializable properties (functions in event choices)
 function serializeState(state: GameState): object {
@@ -136,6 +139,75 @@ export function loadGame(): GameState | null {
       }
     }
 
+    // Migration: add traits to heroes
+    for (const hero of parsed.roster) {
+      if ((hero as any).traits === undefined) (hero as any).traits = [];
+    }
+    for (let i = 0; i < parsed.party.length; i++) {
+      const h = parsed.party[i];
+      if (h && (h as any).traits === undefined) (h as any).traits = [];
+    }
+
+    // Migration: add theme to tower
+    if (parsed.tower && (parsed.tower as any).theme === undefined) {
+      (parsed.tower as any).theme = 'catacombs';
+    }
+
+    // Migration: add playerAngle to floorMap
+    if (parsed.tower && parsed.tower.floorMap && (parsed.tower.floorMap as any).playerAngle === undefined) {
+      (parsed.tower.floorMap as any).playerAngle = 0;
+    }
+
+    // Migration: add prestige
+    if ((parsed as any).prestige === undefined) {
+      (parsed as any).prestige = loadPrestige();
+    }
+
+    // Migration: position number → GridPosition
+    for (const hero of parsed.roster) {
+      if (typeof (hero as any).position === 'number') {
+        (hero as any).position = migrateOldPosition((hero as any).position);
+      }
+      // Reload skills with new useCols/targetCols format
+      if (hero.skills && hero.skills[0] && 'usePositions' in (hero.skills[0] as any)) {
+        (hero as any).skills = HERO_SKILLS[hero.class].map((s: any) => ({ ...s }));
+      }
+    }
+    for (let i = 0; i < parsed.party.length; i++) {
+      const h = parsed.party[i];
+      if (h) {
+        if (typeof (h as any).position === 'number') {
+          (h as any).position = migrateOldPosition((h as any).position);
+        }
+        if (h.skills && h.skills[0] && 'usePositions' in (h.skills[0] as any)) {
+          (h as any).skills = HERO_SKILLS[h.class].map((s: any) => ({ ...s }));
+        }
+      }
+    }
+
+    // Migration: party 4 → 6 slots
+    if (parsed.party.length === 4) {
+      parsed.party.push(null, null);
+    }
+
+    // Migration: combat monsters position
+    if (parsed.combat) {
+      for (const m of parsed.combat.monsters) {
+        if (typeof (m as any).position === 'number') {
+          (m as any).position = migrateOldPosition((m as any).position);
+        }
+        if ((m as any).size === undefined) (m as any).size = 'small';
+      }
+      for (const h of parsed.combat.heroes) {
+        if (typeof (h as any).position === 'number') {
+          (h as any).position = migrateOldPosition((h as any).position);
+        }
+        if (h.skills && h.skills[0] && 'usePositions' in (h.skills[0] as any)) {
+          (h as any).skills = HERO_SKILLS[h.class].map((s: any) => ({ ...s }));
+        }
+      }
+    }
+
     return parsed;
   } catch (err) {
     return null;
@@ -151,7 +223,37 @@ export function deleteSave(): void {
     if (existsSync(SAVE_FILE)) {
       unlinkSync(SAVE_FILE);
     }
+    // NOTE: prestige.json is NOT deleted — it persists across runs
   } catch (err) {
     // Silently ignore delete errors
+  }
+}
+
+// === Prestige persistence (separate file) ===
+export function savePrestige(prestige: PrestigeState): boolean {
+  try {
+    if (!existsSync(SAVE_DIR)) {
+      mkdirSync(SAVE_DIR, { recursive: true });
+    }
+    writeFileSync(PRESTIGE_FILE, JSON.stringify(prestige, null, 2), 'utf-8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadPrestige(): PrestigeState {
+  try {
+    if (!existsSync(PRESTIGE_FILE)) {
+      return { points: 0, totalEarned: 0, purchased: [] };
+    }
+    const data = readFileSync(PRESTIGE_FILE, 'utf-8');
+    const parsed = JSON.parse(data) as PrestigeState;
+    if (!Array.isArray(parsed.purchased)) parsed.purchased = [];
+    if (typeof parsed.points !== 'number') parsed.points = 0;
+    if (typeof parsed.totalEarned !== 'number') parsed.totalEarned = 0;
+    return parsed;
+  } catch {
+    return { points: 0, totalEarned: 0, purchased: [] };
   }
 }

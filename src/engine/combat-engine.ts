@@ -1,6 +1,7 @@
 import type { Hero, Monster, Skill, CombatState, TurnOrder, StatusEffect } from '../models/types.ts';
 import { randomInt, percentChance, clamp, randomChoice } from '../utils/helpers.ts';
-import { applyStress, processAfflictionBehavior } from './stress-engine.ts';
+import { getTraitStatBonuses } from '../data/traits.ts';
+import { executeBossPattern } from './boss-patterns.ts';
 
 // ============================================================
 // DEEP COPY
@@ -61,7 +62,7 @@ export function generateTurnOrder(heroes: Hero[], monsters: Monster[]): TurnOrde
 // ============================================================
 // EQUIPMENT STATS
 // ============================================================
-export function getEffectiveStats(hero: Hero): Hero['stats'] {
+export function getEffectiveStats(hero: Hero, context?: { isBoss?: boolean }): Hero['stats'] {
   const stats = { ...hero.stats };
   const equipment = [hero.equipment.weapon, hero.equipment.armor, hero.equipment.trinket1, hero.equipment.trinket2];
 
@@ -72,6 +73,25 @@ export function getEffectiveStats(hero: Hero): Hero['stats'] {
       if (key in stats && typeof stats[key] === 'number') {
         (stats as any)[key] = (stats as any)[key] + mod.value;
       }
+    }
+  }
+
+  // Apply trait bonuses
+  if (hero.traits && hero.traits.length > 0) {
+    const hpPercent = stats.hp / stats.maxHp;
+    const bonuses = getTraitStatBonuses(hero.traits, {
+      isBoss: context?.isBoss,
+      hpPercent,
+    });
+    stats.attack += bonuses.attack;
+    stats.defense += bonuses.defense;
+    stats.speed += bonuses.speed;
+    stats.accuracy += bonuses.accuracy;
+    stats.dodge += bonuses.dodge;
+    stats.crit += bonuses.crit;
+    if (bonuses.maxHp !== 0) {
+      stats.maxHp += bonuses.maxHp;
+      if (stats.hp > stats.maxHp) stats.hp = stats.maxHp;
     }
   }
 
@@ -201,7 +221,13 @@ export function removeStun(effects: StatusEffect[]): StatusEffect[] {
 // SKILL VALIDATION
 // ============================================================
 export function canUseSkill(hero: Hero, skill: Skill): boolean {
-  return skill.usePositions.includes(hero.position);
+  return skill.useCols.includes(hero.position.col);
+}
+
+function matchesSkillTarget(skill: Skill, pos: { row: number; col: number }): boolean {
+  if (!skill.targetCols.includes(pos.col)) return false;
+  if (skill.targetRows && !skill.targetRows.includes(pos.row)) return false;
+  return true;
 }
 
 export function getValidTargets(skill: Skill, combat: CombatState, isHero: boolean): string[] {
@@ -209,24 +235,24 @@ export function getValidTargets(skill: Skill, combat: CombatState, isHero: boole
     if (skill.targetAlly) {
       return combat.heroes
         .filter(h => h.stats.hp > 0 || h.isDeathsDoor)
-        .filter(h => skill.targetPositions.includes(h.position))
+        .filter(h => matchesSkillTarget(skill, h.position))
         .map(h => h.id);
     } else {
       return combat.monsters
         .filter(m => m.stats.hp > 0)
-        .filter(m => skill.targetPositions.includes(m.position))
+        .filter(m => matchesSkillTarget(skill, m.position))
         .map(m => m.id);
     }
   } else {
     if (skill.targetAlly) {
       return combat.monsters
         .filter(m => m.stats.hp > 0)
-        .filter(m => skill.targetPositions.includes(m.position))
+        .filter(m => matchesSkillTarget(skill, m.position))
         .map(m => m.id);
     } else {
       return combat.heroes
         .filter(h => h.stats.hp > 0 || h.isDeathsDoor)
-        .filter(h => skill.targetPositions.includes(h.position))
+        .filter(h => matchesSkillTarget(skill, h.position))
         .map(h => h.id);
     }
   }
@@ -253,12 +279,20 @@ function applySkillEffects(
 
   for (const effect of skill.effects) {
     if (percentChance(effect.chance)) {
-      newEffects.push({
+      const existingIdx = newEffects.findIndex(
+        e => e.type === effect.type && e.source === skill.name
+      );
+      const newEffect = {
         type: effect.type,
         duration: effect.duration,
         value: effect.value,
         source: skill.name,
-      });
+      };
+      if (existingIdx !== -1) {
+        newEffects[existingIdx] = newEffect; // 갱신 (duration 리셋)
+      } else {
+        newEffects.push(newEffect);
+      }
       log.push(`${name}에게 ${effectNames[effect.type] ?? effect.type} 효과!`);
     }
   }
@@ -287,27 +321,6 @@ export function executeHeroSkill(
   const skill = hero.skills[skillIndex];
   if (!skill) return { combat, log: ['스킬을 찾을 수 없습니다.'] };
 
-  // Check affliction behavior
-  const afflictionBehavior = processAfflictionBehavior(hero);
-  if (afflictionBehavior) {
-    log.push(...afflictionBehavior.log);
-    if (afflictionBehavior.action === 'skip') {
-      newCombat.log.push(...log);
-      return { combat: newCombat, log };
-    }
-    if (afflictionBehavior.action === 'stress_party') {
-      for (let i = 0; i < heroes.length; i++) {
-        if (heroes[i]!.id !== heroId && heroes[i]!.stats.hp > 0) {
-          const result = applyStress(heroes[i]!, 5);
-          heroes[i] = result.hero;
-          log.push(...result.log);
-        }
-      }
-      newCombat.log.push(...log);
-      return { combat: newCombat, log };
-    }
-  }
-
   if (skill.targetAlly) {
     // Healing / buff skill
     const targetIdx = heroes.findIndex(h => h.id === targetId);
@@ -320,11 +333,6 @@ export function executeHeroSkill(
       const healAmount = randomInt(skill.heal.min, skill.heal.max);
       heroes[targetIdx] = applyHealing(target, healAmount);
       log.push(`{bold}{green-fg}${target.name}이(가) HP ${healAmount} 회복!{/green-fg}{/bold}`);
-    }
-    if (skill.stressHeal) {
-      const stressResult = applyStress(heroes[targetIdx]!, -skill.stressHeal);
-      heroes[targetIdx] = stressResult.hero;
-      log.push(...stressResult.log);
     }
     if (skill.effects) {
       heroes[targetIdx] = applySkillEffects(skill, heroes[targetIdx]!, log) as Hero;
@@ -365,8 +373,6 @@ export function executeHeroSkill(
       const { damage, isCrit } = calculateDamage(effectiveStats.attack, skill, target.stats.defense, effectiveStats.crit);
       if (isCrit) {
         log.push(`{bold}{yellow-fg}치명타! ${damage} 피해!{/yellow-fg}{/bold}`);
-        const stressResult = applyStress(heroes[heroIdx]!, -5);
-        heroes[heroIdx] = stressResult.hero;
       } else {
         log.push(`{bold}{red-fg}${damage} 피해!{/red-fg}{/bold}`);
       }
@@ -384,8 +390,12 @@ export function executeHeroSkill(
   }
 
   // Handle self-move
-  if (skill.selfMove && skill.selfMove !== 0) {
-    const newPos = clamp(hero.position + skill.selfMove, 1, 4);
+  if (skill.selfMove && (skill.selfMove.row !== 0 || skill.selfMove.col !== 0)) {
+    const currentPos = heroes[heroIdx]!.position;
+    const newPos = {
+      row: clamp(currentPos.row + skill.selfMove.row, 1, 3),
+      col: clamp(currentPos.col + skill.selfMove.col, 1, 3),
+    };
     heroes[heroIdx] = { ...heroes[heroIdx]!, position: newPos };
   }
 
@@ -404,7 +414,7 @@ export function getEnemyAction(
   const aliveHeroes = heroes.filter(h => h.stats.hp > 0 || h.isDeathsDoor);
   if (aliveHeroes.length === 0) return null;
 
-  const availableSkills = monster.skills.filter(s => s.usePositions.includes(monster.position));
+  const availableSkills = monster.skills.filter(s => s.useCols.includes(monster.position.col));
   if (availableSkills.length === 0) return null;
 
   // Check if any ally monster needs healing
@@ -414,6 +424,28 @@ export function getEnemyAction(
     const healSkill = availableSkills.find(s => s.targetAlly && s.heal);
     if (healSkill) {
       return { skill: healSkill, targetId: lowHpAlly.id };
+    }
+  }
+
+  // Buff skill: skip if target already has the same buff with duration >= 2
+  const buffSkills = availableSkills.filter(s => s.targetAlly && !s.heal && s.effects && s.effects.length > 0);
+  if (buffSkills.length > 0) {
+    for (const bs of buffSkills) {
+      const buffTargets = allyMonsters.filter(m => {
+        return !bs.effects!.every(eff =>
+          m.statusEffects.some(se => se.type === eff.type && se.duration >= 2)
+        );
+      });
+      // Also check self
+      const selfNeedsBuff = !bs.effects!.every(eff =>
+        monster.statusEffects.some(se => se.type === eff.type && se.duration >= 2)
+      );
+      if (selfNeedsBuff && percentChance(30)) {
+        return { skill: bs, targetId: monster.id };
+      }
+      if (buffTargets.length > 0 && percentChance(30)) {
+        return { skill: bs, targetId: buffTargets[randomInt(0, buffTargets.length - 1)]!.id };
+      }
     }
   }
 
@@ -517,6 +549,24 @@ export function executeEnemyTurn(combat: CombatState, monsterId: string): { comb
     statusEffects: tickStatusEffects(monsters[monsterIdx]!.statusEffects),
   };
 
+  // Boss pattern check (before normal AI)
+  if (monsters[monsterIdx]!.isBoss) {
+    const patternResult = executeBossPattern(newCombat, monsters[monsterIdx]!);
+    if (patternResult) {
+      log.push(...patternResult.log);
+      // Apply pattern changes
+      Object.assign(newCombat, patternResult.combat);
+      // Refresh references
+      newCombat.heroes = patternResult.combat.heroes;
+      newCombat.monsters = patternResult.combat.monsters;
+      if (patternResult.combat.turnOrder) newCombat.turnOrder = patternResult.combat.turnOrder;
+      if (patternResult.skipNormalAction) {
+        newCombat.log.push(...log);
+        return { combat: newCombat, log };
+      }
+    }
+  }
+
   // AI choose action
   const action = getEnemyAction(monsters[monsterIdx]!, heroes, monsters);
   if (!action) {
@@ -564,10 +614,6 @@ export function executeEnemyTurn(combat: CombatState, monsterId: string): { comb
       const { damage, isCrit } = calculateDamage(monster.stats.attack, skill, targetEffStats.defense);
       if (isCrit) {
         log.push(`{bold}{yellow-fg}치명타! ${damage} 피해!{/yellow-fg}{/bold}`);
-        // Crit against heroes: +10 stress
-        const stressResult = applyStress(heroes[heroIdx]!, 10);
-        heroes[heroIdx] = stressResult.hero;
-        log.push(...stressResult.log);
       } else {
         log.push(`{bold}{red-fg}${damage} 피해!{/red-fg}{/bold}`);
       }
@@ -575,13 +621,6 @@ export function executeEnemyTurn(combat: CombatState, monsterId: string): { comb
       const damageResult = applyDamageToHero(target, damage);
       heroes[heroIdx] = damageResult.hero;
       log.push(...damageResult.log);
-
-      // Stress from monster attack
-      if (monster.stressDamage > 0 && heroes[heroIdx]!.stats.hp >= 0) {
-        const stressResult = applyStress(heroes[heroIdx]!, monster.stressDamage);
-        heroes[heroIdx] = stressResult.hero;
-        log.push(...stressResult.log);
-      }
 
       // Apply status effects
       if (skill.effects && heroes[heroIdx]!.stats.hp > 0) {

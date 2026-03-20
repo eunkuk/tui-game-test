@@ -4,15 +4,18 @@ import type { GameAction } from './actions.ts';
 import { createHero, createMainCharacter, resetHeroNames, COMPANION_CLASSES, levelUpHero, applyStatPoints, getStars } from '../data/heroes.ts';
 import { SUPPLY_ITEMS, createItemCopy } from '../data/items.ts';
 import { clamp, randomInt } from '../utils/helpers.ts';
-import { saveGame, loadGame, hasSaveFile, deleteSave } from '../engine/save-load.ts';
+import { saveGame, loadGame, hasSaveFile, deleteSave, loadPrestige, savePrestige } from '../engine/save-load.ts';
 import { generateFloor } from '../data/dungeons.ts';
 import { generateFloorMap } from '../engine/map-generator.ts';
+import { getThemeForFloor } from '../data/themes.ts';
+import { hasPrestigeUpgrade, getStartGold, getRecruitCost, getMaxRoster, PRESTIGE_UPGRADES, calculatePrestigeGain } from '../data/prestige.ts';
+import { resetBossPatterns } from '../engine/boss-patterns.ts';
 
 function initialState(): GameState {
   return {
     screen: 'title',
     roster: [],
-    party: [null, null, null, null],
+    party: [null, null, null, null, null, null],
     inventory: [],
     gold: 500,
     tower: null,
@@ -29,6 +32,7 @@ function initialState(): GameState {
     paused: false,
     mainCharacterId: null,
     pendingLoot: null,
+    prestige: { points: 0, totalEarned: 0, purchased: [] },
   };
 }
 
@@ -36,17 +40,29 @@ function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
     case 'NEW_GAME': {
       resetHeroNames();
-      const mainChar = { ...createMainCharacter(action.mainCharClass), position: 1 };
-      const torches = [createItemCopy(SUPPLY_ITEMS[0]!), createItemCopy(SUPPLY_ITEMS[0]!)];
+      const prestige = state.prestige;
+      const mainChar = { ...createMainCharacter(action.mainCharClass), position: { row: 2, col: 1 } };
       const food = [createItemCopy(SUPPLY_ITEMS[1]!), createItemCopy(SUPPLY_ITEMS[1]!)];
+      const startInventory = [...food];
+
+      // Apply prestige: start potions
+      if (hasPrestigeUpgrade(prestige, 'start_potions')) {
+        // Find healing potion in items
+        const healPotion = SUPPLY_ITEMS.find(i => i.healAmount);
+        if (healPotion) {
+          startInventory.push(createItemCopy(healPotion), createItemCopy(healPotion));
+        }
+      }
+
       return {
         ...initialState(),
         roster: [mainChar],
-        party: [mainChar, null, null, null],
-        inventory: [...torches, ...food],
-        gold: 500,
+        party: [mainChar, null, null, null, null, null],
+        inventory: startInventory,
+        gold: getStartGold(prestige),
         mainCharacterId: mainChar.id,
         screen: 'town',
+        prestige, // preserve prestige across games
         gameLog: ['새로운 모험이 시작됩니다...', `${mainChar.name}이(가) 여정을 시작합니다.`],
       };
     }
@@ -55,13 +71,15 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, screen: action.screen };
 
     case 'RECRUIT_HERO': {
-      if (state.gold < 300) return state;
-      if (state.roster.length >= 12) return state;
+      const recruitCost = getRecruitCost(state.prestige);
+      const maxRoster = getMaxRoster(state.prestige);
+      if (state.gold < recruitCost) return state;
+      if (state.roster.length >= maxRoster) return state;
       const newHero = createHero(action.heroClass);
       return {
         ...state,
         roster: [...state.roster, newHero],
-        gold: state.gold - 300,
+        gold: state.gold - recruitCost,
         gameLog: [...state.gameLog, `${newHero.name}이(가) 영입되었습니다. (${getStars(newHero.rarity)})`],
       };
     }
@@ -81,28 +99,34 @@ function gameReducer(state: GameState, action: GameAction): GameState {
     case 'ADD_TO_PARTY': {
       const hero = state.roster.find(h => h.id === action.heroId);
       if (!hero) return state;
-      if (action.position < 0 || action.position > 3) return state;
-      if (state.party[action.position] !== null) return state;
+      if (action.slotIndex < 0 || action.slotIndex > 5) return state;
+      if (state.party[action.slotIndex] !== null) return state;
       if (state.party.some(h => h?.id === action.heroId)) return state;
 
-      const updatedHero: Hero = { ...hero, position: action.position + 1 };
+      // Map slot index to grid position: slots 0-2 = col 1 (rows 1-3), slots 3-5 = col 2-3
+      const slotToGridPos = (slot: number): { row: number; col: number } => {
+        const col = Math.floor(slot / 3) + 1;
+        const row = (slot % 3) + 1;
+        return { row, col };
+      };
+      const gridPos = slotToGridPos(action.slotIndex);
+      const updatedHero: Hero = { ...hero, position: gridPos };
       const newParty = [...state.party];
-      newParty[action.position] = updatedHero;
+      newParty[action.slotIndex] = updatedHero;
       return {
         ...state,
         party: newParty,
-        gameLog: [...state.gameLog, `${hero.name}이(가) ${action.position + 1}번 위치에 배치되었습니다.`],
+        gameLog: [...state.gameLog, `${hero.name}이(가) 파티에 배치되었습니다.`],
       };
     }
 
     case 'REMOVE_FROM_PARTY': {
-      if (action.position < 0 || action.position > 3) return state;
-      const removed = state.party[action.position];
+      if (action.slotIndex < 0 || action.slotIndex > 5) return state;
+      const removed = state.party[action.slotIndex];
       if (!removed) return state;
-      // Cannot remove main character from party
       if (removed.id === state.mainCharacterId) return state;
       const newParty = [...state.party];
-      newParty[action.position] = null;
+      newParty[action.slotIndex] = null;
       return {
         ...state,
         party: newParty,
@@ -112,12 +136,19 @@ function gameReducer(state: GameState, action: GameAction): GameState {
 
     case 'SWAP_PARTY_POSITION': {
       const { pos1, pos2 } = action;
-      if (pos1 < 0 || pos1 > 3 || pos2 < 0 || pos2 > 3) return state;
+      if (pos1 < 0 || pos1 > 5 || pos2 < 0 || pos2 > 5) return state;
       const newParty = [...state.party];
       const h1 = newParty[pos1];
       const h2 = newParty[pos2];
-      newParty[pos1] = h2 ? { ...h2, position: pos1 + 1 } : null;
-      newParty[pos2] = h1 ? { ...h1, position: pos2 + 1 } : null;
+      // Swap their positions
+      if (h1 && h2) {
+        const tempPos = { ...h1.position };
+        newParty[pos1] = { ...h2, position: tempPos };
+        newParty[pos2] = { ...h1, position: { ...h2.position } };
+      } else {
+        newParty[pos1] = h2 ? { ...h2 } : null;
+        newParty[pos2] = h1 ? { ...h1 } : null;
+      }
       return { ...state, party: newParty };
     }
 
@@ -275,7 +306,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       let newParty = [...state.party];
       const logs: string[] = [];
 
-      if (action.heroId && (item.healAmount || item.stressHealAmount || item.buffEffect)) {
+      if (action.heroId && (item.healAmount || item.buffEffect)) {
         for (let i = 0; i < newParty.length; i++) {
           if (newParty[i]?.id === action.heroId) {
             let hero = { ...newParty[i]!, stats: { ...newParty[i]!.stats }, statusEffects: [...newParty[i]!.statusEffects] };
@@ -286,10 +317,6 @@ function gameReducer(state: GameState, action: GameAction): GameState {
                 hero = { ...hero, isDeathsDoor: false };
               }
               logs.push(`${hero.name}이(가) HP ${actualHeal} 회복!`);
-            }
-            if (item.stressHealAmount) {
-              hero.stats.stress = clamp(hero.stats.stress - item.stressHealAmount, 0, 200);
-              logs.push(`${hero.name}의 스트레스가 ${item.stressHealAmount} 감소!`);
             }
             if (item.buffEffect) {
               const buffStatMap: Record<string, string> = {
@@ -313,22 +340,6 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         }
       }
 
-      // Torch item handling
-      if (item.torchAmount && state.tower) {
-        const newTower = {
-          ...state.tower,
-          torchLevel: clamp(state.tower.torchLevel + item.torchAmount, 0, 100),
-        };
-        logs.push(`횃불 밝기가 ${item.torchAmount} 증가!`);
-        return {
-          ...state,
-          party: newParty,
-          tower: newTower,
-          inventory: state.inventory.filter(i => i.id !== action.itemId),
-          gameLog: [...state.gameLog, ...logs],
-        };
-      }
-
       return {
         ...state,
         party: newParty,
@@ -338,16 +349,17 @@ function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'ENTER_TOWER': {
+      resetBossPatterns();
       const firstFloorMap = generateFloorMap(1);
       return {
         ...state,
         tower: {
           currentFloor: 1,
           maxFloorReached: state.maxFloorReached,
-          torchLevel: 100,
           floorMap: firstFloorMap,
           inProgress: true,
           paused: false,
+          theme: getThemeForFloor(1),
         },
         paused: false,
         screen: 'dungeon',
@@ -359,7 +371,6 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       if (!state.tower) return state;
       const nextFloor = state.tower.currentFloor + 1;
       if (nextFloor > 100) return state;
-      const torchDecrease = randomInt(3, 6);
       const newFloorMap = generateFloorMap(nextFloor);
       const newMaxFloor = Math.max(state.maxFloorReached, nextFloor);
       return {
@@ -368,11 +379,11 @@ function gameReducer(state: GameState, action: GameAction): GameState {
           ...state.tower,
           currentFloor: nextFloor,
           maxFloorReached: newMaxFloor,
-          torchLevel: clamp(state.tower.torchLevel - torchDecrease, 0, 100),
           floorMap: newFloorMap,
+          theme: getThemeForFloor(nextFloor),
         },
         maxFloorReached: newMaxFloor,
-        gameLog: [...state.gameLog, `${nextFloor}층으로 이동합니다. (횃불 -${torchDecrease})`],
+        gameLog: [...state.gameLog, `${nextFloor}층으로 이동합니다.`],
       };
     }
 
@@ -382,21 +393,6 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         tower: null,
         screen: 'town',
         gameLog: [...state.gameLog, '어둠의 탑에서 귀환했습니다.'],
-      };
-    }
-
-    case 'USE_TORCH': {
-      if (!state.tower) return state;
-      const torchItem = state.inventory.find(i => i.torchAmount && i.consumable);
-      if (!torchItem) return state;
-      return {
-        ...state,
-        tower: {
-          ...state.tower,
-          torchLevel: clamp(state.tower.torchLevel + 25, 0, 100),
-        },
-        inventory: state.inventory.filter(i => i.id !== torchItem.id),
-        gameLog: [...state.gameLog, '횃불을 사용했습니다. (밝기 +25)'],
       };
     }
 
@@ -444,7 +440,13 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       const hasBossMonster = state.combat.monsters.some(m => m.isBoss);
       const floor = state.tower.currentFloor;
       const baseExp = floor * 10 + monsterCount * 15;
-      const totalExp = hasBossMonster ? baseExp * 3 : baseExp;
+      let totalExp = hasBossMonster ? baseExp * 3 : baseExp;
+      // Apply prestige exp bonus
+      if (hasPrestigeUpgrade(state.prestige, 'exp_bonus_20')) {
+        totalExp = Math.round(totalExp * 1.2);
+      } else if (hasPrestigeUpgrade(state.prestige, 'exp_bonus_10')) {
+        totalExp = Math.round(totalExp * 1.1);
+      }
       const levelUpLogs: string[] = [];
 
       for (let i = 0; i < updatedParty.length; i++) {
@@ -557,9 +559,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       for (const combatHero of state.combat.heroes) {
         for (let i = 0; i < updatedParty2.length; i++) {
           if (updatedParty2[i]?.id === combatHero.id) {
-            const h = { ...combatHero, stats: { ...combatHero.stats } };
-            h.stats.stress = clamp(h.stats.stress + 10, 0, 200);
-            updatedParty2[i] = h;
+            updatedParty2[i] = { ...combatHero, stats: { ...combatHero.stats } };
             break;
           }
         }
@@ -571,7 +571,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         combat: null,
         tower: null,
         screen: 'town',
-        gameLog: [...state.gameLog, '전투에서 도주했습니다! 탑에서 귀환합니다. (스트레스 +10)'],
+        gameLog: [...state.gameLog, '전투에서 도주했습니다! 탑에서 귀환합니다.'],
       };
     }
 
@@ -776,10 +776,6 @@ function gameReducer(state: GameState, action: GameAction): GameState {
               if (hero.isDeathsDoor && hero.stats.hp > 0) hero = { ...hero, isDeathsDoor: false };
               logs.push(`${hero.name}이(가) HP ${actualHeal} 회복!`);
             }
-            if (currentItem.stressHealAmount) {
-              hero.stats.stress = clamp(hero.stats.stress - currentItem.stressHealAmount, 0, 200);
-              logs.push(`${hero.name}의 스트레스가 ${currentItem.stressHealAmount} 감소!`);
-            }
             if (currentItem.buffEffect) {
               const buffStatMap: Record<string, string> = { attack: 'buff_attack', defense: 'buff_defense', speed: 'buff_speed' };
               const effectType = buffStatMap[currentItem.buffEffect.stat] || `buff_${currentItem.buffEffect.stat}`;
@@ -817,6 +813,33 @@ function gameReducer(state: GameState, action: GameAction): GameState {
     case 'CLEAR_PENDING_LOOT':
       return { ...state, pendingLoot: null };
 
+    case 'EARN_PRESTIGE': {
+      const newPrestige = {
+        ...state.prestige,
+        points: state.prestige.points + action.amount,
+        totalEarned: state.prestige.totalEarned + action.amount,
+      };
+      return { ...state, prestige: newPrestige };
+    }
+
+    case 'BUY_PRESTIGE_UPGRADE': {
+      const upgrade = PRESTIGE_UPGRADES.find(u => u.id === action.upgradeId);
+      if (!upgrade) return state;
+      if (state.prestige.purchased.includes(action.upgradeId)) return state;
+      if (state.prestige.points < upgrade.cost) return state;
+      if (upgrade.requires && !state.prestige.purchased.includes(upgrade.requires)) return state;
+      const newPrestige = {
+        ...state.prestige,
+        points: state.prestige.points - upgrade.cost,
+        purchased: [...state.prestige.purchased, action.upgradeId],
+      };
+      return {
+        ...state,
+        prestige: newPrestige,
+        gameLog: [...state.gameLog, `명성 업그레이드: ${upgrade.name} 구매!`],
+      };
+    }
+
     case 'USE_COMBAT_ITEM': {
       if (!state.combat) return state;
       const item = state.inventory.find(i => i.id === action.itemId);
@@ -834,10 +857,6 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         hero.stats.hp = clamp(hero.stats.hp + item.healAmount, 0, hero.stats.maxHp);
         if (hero.isDeathsDoor && hero.stats.hp > 0) hero = { ...hero, isDeathsDoor: false };
         logs.push(`${hero.name}이(가) ${item.name}으로 HP ${actualHeal} 회복!`);
-      }
-      if (item.stressHealAmount) {
-        hero.stats.stress = clamp(hero.stats.stress - item.stressHealAmount, 0, 200);
-        logs.push(`${hero.name}의 스트레스가 ${item.stressHealAmount} 감소!`);
       }
       if (item.buffEffect) {
         const buffStatMap: Record<string, string> = { attack: 'buff_attack', defense: 'buff_defense', speed: 'buff_speed' };
@@ -870,6 +889,8 @@ export class GameStore extends EventEmitter {
   constructor() {
     super();
     this.state = initialState();
+    // Load persistent prestige
+    this.state.prestige = loadPrestige();
   }
 
   getState(): GameState {
@@ -887,6 +908,7 @@ export class GameStore extends EventEmitter {
   }
 
   saveGame(): boolean {
+    savePrestige(this.state.prestige);
     return saveGame(this.state);
   }
 

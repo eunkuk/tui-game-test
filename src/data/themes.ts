@@ -10,7 +10,7 @@ export interface ThemeConfig {
   floorColor: string;
   dimWallColor: string;
   dimFloorColor: string;
-  envEffect?: 'hp_drain' | 'speed_debuff' | 'stress_gain';
+  envEffect?: 'hp_drain' | 'speed_debuff';
   envValue?: number;
 }
 
@@ -18,7 +18,7 @@ export const THEME_CONFIGS: ThemeConfig[] = [
   {
     id: 'catacombs', name: '지하묘지',
     floorRange: [1, 20],
-    wallChar: '#', wallColor: 'gray',
+    wallChar: '#', wallColor: '#808080',
     floorChar: '.', floorColor: '#888888',
     dimWallColor: '#444444', dimFloorColor: '#444444',
   },
@@ -51,7 +51,6 @@ export const THEME_CONFIGS: ThemeConfig[] = [
     wallChar: '#', wallColor: '#4B0082',
     floorChar: '.', floorColor: '#2F0044',
     dimWallColor: '#1a0033', dimFloorColor: '#220033',
-    envEffect: 'stress_gain', envValue: 2,
   },
 ];
 

@@ -118,11 +118,11 @@ export class StatAllocationScreen extends BaseScreen {
       this.removePoint(hero);
     });
 
-    this.screen.key(['c', 'C'], () => {
+    this.registerKey(['c', 'C'], () => {
       this.confirmAllocation(hero);
     });
 
-    this.screen.key(['escape'], () => {
+    this.registerKey(['escape'], () => {
       this.store.dispatch({ type: 'NAVIGATE', screen: 'hero_detail' });
     });
 

@@ -10,6 +10,15 @@ export interface StatusEffect {
   source: string;
 }
 
+// === Grid Position ===
+export interface GridPosition {
+  row: number;  // 1-3: 상/중/하
+  col: number;  // 1-3: 전열/중열/후열
+}
+
+// === Monster Size (2단계 대비) ===
+export type MonsterSize = 'small' | 'medium' | 'large';
+
 // === Skills ===
 export interface SkillEffect {
   type: StatusEffectType;
@@ -22,16 +31,16 @@ export interface Skill {
   id: string;
   name: string;
   description: string;
-  usePositions: number[];    // hero must be in one of these positions (1-4)
-  targetPositions: number[]; // can target these enemy positions (1-4)
-  targetCount: number;       // 1=single, 4=all
+  useCols: number[];         // hero must be in one of these cols (1-3)
+  targetCols: number[];      // can target these enemy cols (1-3)
+  targetRows?: number[];     // optional row filter (undefined = all rows)
+  targetCount: number;       // 1=single, 9=all
   targetAlly: boolean;
   damage: { min: number; max: number };  // multiplier
   accuracy: number;
   crit: number;
   heal?: { min: number; max: number };
-  stressHeal?: number;
-  selfMove?: number;
+  selfMove?: { row: number; col: number };
   effects?: SkillEffect[];
 }
 
@@ -54,13 +63,30 @@ export interface Item {
   value: number;
   consumable?: boolean;
   healAmount?: number;
-  stressHealAmount?: number;
-  torchAmount?: number;
   buffEffect?: { stat: string; value: number; duration: number };
 }
 
 // === Hero Rarity ===
 export type HeroRarity = 1 | 2 | 3;
+
+// === Traits ===
+export type TraitCategory = 'positive' | 'negative' | 'neutral';
+
+export interface TraitEffect {
+  type: 'stat_bonus' | 'gold_modifier' | 'crit_bonus';
+  stat?: string;
+  value: number;
+  isPercent?: boolean;
+  condition?: 'boss_fight' | 'low_hp';
+}
+
+export interface Trait {
+  id: string;
+  name: string;
+  description: string;
+  category: TraitCategory;
+  effects: TraitEffect[];
+}
 
 // === Heroes ===
 export interface HeroStats {
@@ -72,14 +98,11 @@ export interface HeroStats {
   accuracy: number;
   dodge: number;
   crit: number;
-  stress: number;
 }
 
 export type MainCharClass = 'warrior' | 'rogue' | 'mage' | 'ranger' | 'paladin' | 'dark_knight';
 export type CompanionClass = 'crusader' | 'highwayman' | 'plague_doctor' | 'vestal';
 export type HeroClass = MainCharClass | CompanionClass;
-export type AfflictionType = 'hopeless' | 'fearful' | 'paranoid' | 'selfish' | 'abusive';
-export type VirtueType = 'courageous' | 'focused' | 'powerful' | 'stalwart' | 'vigorous';
 
 export interface Hero {
   id: string;
@@ -94,21 +117,20 @@ export interface Hero {
     trinket1?: Item;
     trinket2?: Item;
   };
-  position: number;
+  position: GridPosition;
   statusEffects: StatusEffect[];
   isDeathsDoor: boolean;
   deathsDoorResist: number;
-  affliction?: AfflictionType;
-  virtue?: VirtueType;
   rarity: HeroRarity;
   isMainCharacter: boolean;
   statPoints: number;
   exp: number;
   expToLevel: number;
+  traits: Trait[];
 }
 
 // === Monsters ===
-export type MonsterType = 'bone_soldier' | 'bone_archer' | 'bone_captain' | 'cultist_brawler' | 'cultist_acolyte' | 'madman' | 'large_carrion_eater' | 'necromancer' | 'shadow_lurker' | 'plague_rat' | 'cursed_knight' | 'dark_mage' | 'gargoyle' | 'wraith';
+export type MonsterType = 'bone_soldier' | 'bone_archer' | 'bone_captain' | 'cultist_brawler' | 'cultist_acolyte' | 'madman' | 'large_carrion_eater' | 'necromancer' | 'shadow_lurker' | 'plague_rat' | 'cursed_knight' | 'dark_mage' | 'gargoyle' | 'wraith' | 'frost_titan' | 'flame_demon' | 'void_lord';
 
 export interface MonsterStats {
   maxHp: number;
@@ -127,10 +149,10 @@ export interface Monster {
   type: MonsterType;
   stats: MonsterStats;
   skills: Skill[];
-  position: number;
+  position: GridPosition;
+  size: MonsterSize;
   statusEffects: StatusEffect[];
   isBoss: boolean;
-  stressDamage: number;
 }
 
 // === Dungeon ===
@@ -169,15 +191,19 @@ export interface FloorMap {
   playerY: number;
   exitX: number;
   exitY: number;
+  playerAngle: number;  // 라디안. 0=동, PI/2=남, PI=서, 3PI/2=북
 }
+
+// === Dungeon Theme ===
+export type DungeonTheme = 'catacombs' | 'dark_forest' | 'volcano' | 'snow_mountain' | 'abyss';
 
 export interface TowerState {
   currentFloor: number;
   maxFloorReached: number;
-  torchLevel: number;
   floorMap: FloorMap;
   inProgress: boolean;
   paused: boolean;
+  theme: DungeonTheme;
 }
 
 // === Combat ===
@@ -211,6 +237,27 @@ export interface PendingLoot {
   source: 'combat' | 'treasure' | 'curio';
 }
 
+// === Prestige ===
+export type PrestigeUpgradeId =
+  | 'start_gold_100' | 'start_gold_200'
+  | 'recruit_discount_50' | 'recruit_discount_100'
+  | 'start_potions' | 'exp_bonus_10' | 'exp_bonus_20'
+  | 'max_roster_14';
+
+export interface PrestigeUpgrade {
+  id: PrestigeUpgradeId;
+  name: string;
+  description: string;
+  cost: number;
+  requires?: PrestigeUpgradeId;
+}
+
+export interface PrestigeState {
+  points: number;
+  totalEarned: number;
+  purchased: PrestigeUpgradeId[];
+}
+
 // === Game State ===
 export type Screen = 'title' | 'town' | 'party_select' | 'dungeon' | 'combat' | 'inventory' | 'event' | 'game_over' | 'hero_detail' | 'character_select' | 'stat_allocation';
 
@@ -234,6 +281,7 @@ export interface GameState {
   paused: boolean;
   mainCharacterId: string | null;
   pendingLoot: PendingLoot | null;
+  prestige: PrestigeState;
 }
 
 export interface DungeonEvent {

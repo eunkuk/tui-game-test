@@ -205,6 +205,17 @@ export function generateFloorMap(floor: number): FloorMap {
     }
   }
 
+  // 입구 주변 빈 타일 방향으로 초기 각도 설정
+  const dirs = [{dx:1,dy:0,a:0},{dx:0,dy:1,a:Math.PI/2},{dx:-1,dy:0,a:Math.PI},{dx:0,dy:-1,a:-Math.PI/2}];
+  let initAngle = 0;
+  for (const d of dirs) {
+    const nx = entranceX + d.dx, ny = entranceY + d.dy;
+    if (nx >= 0 && nx < width && ny >= 0 && ny < height && tiles[ny]![nx]!.type !== 'wall') {
+      initAngle = d.a;
+      break;
+    }
+  }
+
   const floorMap: FloorMap = {
     width,
     height,
@@ -213,6 +224,7 @@ export function generateFloorMap(floor: number): FloorMap {
     playerY: entranceY,
     exitX,
     exitY,
+    playerAngle: initAngle,
   };
 
   // Compute initial FOV
@@ -242,9 +254,6 @@ export function updateFOV(floorMap: FloorMap, radius: number): void {
   });
 }
 
-export function getFOVRadius(torchLevel: number): number {
-  if (torchLevel > 75) return 8;
-  if (torchLevel > 50) return 7;
-  if (torchLevel > 25) return 6;
-  return 5;
+export function getFOVRadius(): number {
+  return 7;
 }

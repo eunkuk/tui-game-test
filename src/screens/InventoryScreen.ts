@@ -88,17 +88,17 @@ export class InventoryScreen extends BaseScreen {
       this.handleItemAction(index);
     });
 
-    this.screen.key(['d'], () => {
+    this.registerKey(['d'], () => {
       const selected = (this.itemList as any).selected as number;
       this.discardItem(selected);
     });
 
-    this.screen.key(['s'], () => {
+    this.registerKey(['s'], () => {
       const selected = (this.itemList as any).selected as number;
       this.sellItem(selected);
     });
 
-    this.screen.key(['escape'], () => {
+    this.registerKey(['escape'], () => {
       if (this.heroSelectList) {
         this.clearHeroSelect();
         this.itemList.focus();
@@ -161,8 +161,6 @@ export class InventoryScreen extends BaseScreen {
       }
     }
     if (item.healAmount) detail += `\n{green-fg}HP 회복: ${item.healAmount}{/green-fg}`;
-    if (item.stressHealAmount) detail += `\n{cyan-fg}스트레스 감소: ${item.stressHealAmount}{/cyan-fg}`;
-    if (item.torchAmount) detail += `\n{yellow-fg}횃불 밝기: +${item.torchAmount}{/yellow-fg}`;
     if (item.buffEffect) detail += `\n{yellow-fg}버프: ${item.buffEffect.stat} +${item.buffEffect.value} (${item.buffEffect.duration}턴){/yellow-fg}`;
 
     // Action hints based on type
@@ -218,7 +216,7 @@ export class InventoryScreen extends BaseScreen {
         const compStr = comparison ? ` ${comparison}` : '';
         extra = ` ${currentStr} → ${item.name}${compStr}`;
       } else {
-        extra = ` HP ${h.stats.hp}/${h.stats.maxHp} ST ${h.stats.stress}`;
+        extra = ` HP ${h.stats.hp}/${h.stats.maxHp}`;
       }
       return `${h.name} (${getClassName(h.class)})${extra}`;
     });

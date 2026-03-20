@@ -1,8 +1,10 @@
 import blessed from 'blessed';
 import { BaseScreen } from './BaseScreen.ts';
-import type { Hero } from '../models/types.ts';
+import type { Hero, GridPosition } from '../models/types.ts';
 import { getClassName, RECOMMENDED_POSITIONS, getStars } from '../data/heroes.ts';
 import { formatBar } from '../utils/helpers.ts';
+import { getTraitCategoryColor } from '../data/traits.ts';
+import { gridPosLabel } from '../utils/grid.ts';
 
 export class PartySelectScreen extends BaseScreen {
   private availableList!: blessed.Widgets.ListElement;
@@ -74,7 +76,7 @@ export class PartySelectScreen extends BaseScreen {
     // Status/hint bar
     this.createBox({
       bottom: 0, left: 0, width: '100%', height: 3,
-      content: '{gray-fg}←→: 패널 전환  ↑↓: 선택  Enter: 추가/제거  S: 위치 교환  1-4: 위치 교환  Esc: 마을로{/gray-fg}',
+      content: '{gray-fg}←→: 패널 전환  ↑↓: 선택  Enter: 추가/제거  S: 위치 교환  1-6: 위치 교환  Esc: 마을로{/gray-fg}',
       tags: true,
       border: { type: 'line' },
       style: { fg: 'gray', bg: 'black', border: { fg: 'gray' } },
@@ -104,16 +106,19 @@ export class PartySelectScreen extends BaseScreen {
 
     // Update party list
     const partyItems: string[] = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const hero = state.party[i];
-      const posLabel = i < 2 ? '전열' : '후열';
+      const col = Math.floor(i / 3) + 1;
+      const row = (i % 3) + 1;
+      const colLabel = col === 1 ? '전열' : col === 2 ? '중열' : '후열';
+      const posTag = `${colLabel}${row}`;
       if (hero) {
         const hpPct = hero.stats.hp / hero.stats.maxHp;
         const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
         const mcTag = hero.isMainCharacter ? '[주인공] ' : '';
-        partyItems.push(`[${i + 1}] ${posLabel} ${mcTag}${getStars(hero.rarity)} ${getClassName(hero.class)} - ${hero.name}`);
+        partyItems.push(`[${i + 1}] ${posTag} ${mcTag}${getStars(hero.rarity)} ${getClassName(hero.class)} - ${hero.name}`);
       } else {
-        partyItems.push(`[${i + 1}] ${posLabel} --- 빈 슬롯 ---`);
+        partyItems.push(`[${i + 1}] ${posTag} --- 빈 슬롯 ---`);
       }
     }
     this.partyList.setItems(partyItems as any);
@@ -129,22 +134,19 @@ export class PartySelectScreen extends BaseScreen {
     }
 
     const hpBar = formatBar(hero.stats.hp, hero.stats.maxHp, 12);
-    const stressBar = formatBar(hero.stats.stress, 100, 12);
     const hpColor = hero.stats.hp / hero.stats.maxHp > 0.5 ? 'green' : hero.stats.hp / hero.stats.maxHp > 0.25 ? 'yellow' : 'red';
-    const stressColor = hero.stats.stress >= 100 ? 'red' : hero.stats.stress >= 50 ? 'yellow' : 'gray';
 
     const rec = RECOMMENDED_POSITIONS[hero.class];
-    const isOptimalPos = hero.position === 0 || rec.positions.includes(hero.position);
+    const isOptimalPos = rec.cols.includes(hero.position.col);
 
     let content = `{bold}{yellow-fg}${hero.name}{/yellow-fg}{/bold}\n`;
     content += `{cyan-fg}${getClassName(hero.class)}{/cyan-fg} Lv.${hero.level}\n`;
     content += `{cyan-fg}${rec.label}{/cyan-fg}\n`;
-    if (!isOptimalPos && hero.position > 0) {
-      content += `{yellow-fg}! 현재 위치(${hero.position})가 비추천!{/yellow-fg}\n`;
+    if (!isOptimalPos) {
+      content += `{yellow-fg}! 현재 위치${gridPosLabel(hero.position)}가 비추천!{/yellow-fg}\n`;
     }
     content += `\n`;
     content += `HP  {${hpColor}-fg}${hpBar}{/${hpColor}-fg}\n    ${hero.stats.hp}/${hero.stats.maxHp}\n`;
-    content += `ST  {${stressColor}-fg}${stressBar}{/${stressColor}-fg}\n    ${hero.stats.stress}/100\n`;
     const expBar = formatBar(hero.exp, hero.expToLevel, 12);
     content += `EXP {cyan-fg}${expBar}{/cyan-fg}\n    ${hero.exp}/${hero.expToLevel}\n\n`;
     content += `{white-fg}공격:{/white-fg} ${hero.stats.attack}\n`;
@@ -154,10 +156,18 @@ export class PartySelectScreen extends BaseScreen {
     content += `{white-fg}회피:{/white-fg} ${hero.stats.dodge}\n`;
     content += `{white-fg}치명:{/white-fg} ${hero.stats.crit}%\n`;
 
+    if (hero.traits && hero.traits.length > 0) {
+      content += '\n{yellow-fg}특성:{/yellow-fg}\n';
+      for (const trait of hero.traits) {
+        const color = getTraitCategoryColor(trait.category);
+        content += `  {${color}-fg}${trait.name}{/${color}-fg}\n`;
+      }
+    }
+
     if (hero.skills.length > 0) {
       content += '\n{yellow-fg}스킬:{/yellow-fg}\n';
       for (const skill of hero.skills) {
-        const canUse = hero.position === 0 || skill.usePositions.includes(hero.position);
+        const canUse = skill.useCols.includes(hero.position.col);
         const skillColor = canUse ? 'white' : 'red';
         const useMark = canUse ? '+' : 'x';
         content += `  {${skillColor}-fg}[${useMark}] ${skill.name}{/${skillColor}-fg}\n`;
@@ -184,7 +194,7 @@ export class PartySelectScreen extends BaseScreen {
 
   private setupKeys(): void {
     // Panel switching
-    this.screen.key(['left', 'right'], () => {
+    this.registerKey(['left', 'right'], () => {
       if (this.focusedPanel === 'available') {
         this.setFocus('party');
       } else {
@@ -203,7 +213,7 @@ export class PartySelectScreen extends BaseScreen {
       const emptySlot = state.party.findIndex(h => h === null);
       if (emptySlot === -1) return;
 
-      this.store.dispatch({ type: 'ADD_TO_PARTY', heroId: hero.id, position: emptySlot });
+      this.store.dispatch({ type: 'ADD_TO_PARTY', heroId: hero.id, slotIndex: emptySlot });
       this.updateLists();
     });
 
@@ -238,7 +248,7 @@ export class PartySelectScreen extends BaseScreen {
           this.screen.render();
           return;
         }
-        this.store.dispatch({ type: 'REMOVE_FROM_PARTY', position: index });
+        this.store.dispatch({ type: 'REMOVE_FROM_PARTY', slotIndex: index });
         this.updateLists();
       }
     });
@@ -249,9 +259,10 @@ export class PartySelectScreen extends BaseScreen {
     });
 
     // Quick swap with number keys 1-4
-    this.screen.key(['1', '2', '3', '4'], (ch: string) => {
+    this.registerKey(['1', '2', '3', '4', '5', '6'], (ch: string) => {
       if (this.focusedPanel !== 'party') return;
       const targetPos = parseInt(ch) - 1;
+      if (targetPos < 0 || targetPos >= 6) return;
       const currentPos = (this.partyList as any).selected as number;
       if (targetPos === currentPos) return;
       this.store.dispatch({ type: 'SWAP_PARTY_POSITION', pos1: currentPos, pos2: targetPos });
@@ -259,7 +270,7 @@ export class PartySelectScreen extends BaseScreen {
     });
 
     // Swap mode
-    this.screen.key(['s'], () => {
+    this.registerKey(['s'], () => {
       if (this.focusedPanel === 'party') {
         this.swapMode = true;
         this.swapFirst = -1;
@@ -269,7 +280,7 @@ export class PartySelectScreen extends BaseScreen {
     });
 
     // Escape
-    this.screen.key(['escape'], () => {
+    this.registerKey(['escape'], () => {
       if (this.swapMode) {
         this.swapMode = false;
         this.swapFirst = -1;

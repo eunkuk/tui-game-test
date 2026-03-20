@@ -2,10 +2,12 @@ import blessed from 'blessed';
 import { BaseScreen } from './BaseScreen.ts';
 import type { GameStore } from '../state/GameStore.ts';
 import type { Hero, HeroClass, Item } from '../models/types.ts';
-import { COMPANION_CLASSES, HERO_CLASSES, getClassName, getStars } from '../data/heroes.ts';
+import { COMPANION_CLASSES, HERO_CLASSES, getClassName, getStars, CLASS_DESCRIPTIONS } from '../data/heroes.ts';
 import { TOWN_ART } from '../data/ascii-art.ts';
 import { SUPPLY_ITEMS, SHOP_WEAPONS, SHOP_ARMOR, SHOP_TRINKETS } from '../data/items.ts';
 import { formatBar } from '../utils/helpers.ts';
+import { PRESTIGE_UPGRADES, canBuyUpgrade, getRecruitCost, getMaxRoster } from '../data/prestige.ts';
+import { savePrestige } from '../engine/save-load.ts';
 
 export class TownScreen extends BaseScreen {
   private infoBox!: blessed.Widgets.BoxElement;
@@ -28,10 +30,12 @@ export class TownScreen extends BaseScreen {
     const runsDisplay = state.runsCompleted > 0 ? `  |  {green-fg}완료: ${state.runsCompleted}회{/green-fg}` : '';
     const floorRecord = state.maxFloorReached > 0 ? `  |  {magenta-fg}최고: ${state.maxFloorReached}층{/magenta-fg}` : '';
 
+    const prestigeDisplay = state.prestige.points > 0 ? `  |  {yellow-fg}명성: ${state.prestige.points}{/yellow-fg}` : '';
+
     // Top bar
     this.createBox({
       top: 0, left: 0, width: '100%', height: 3,
-      content: `{bold}{yellow-fg} 마을{/yellow-fg}{/bold}  |  {yellow-fg}골드: ${state.gold}{/yellow-fg}  |  {bold}{cyan-fg}[ ${state.week}주차 ]{/cyan-fg}{/bold}  |  {gray-fg}영웅: ${state.roster.length}명{/gray-fg}  |  수집: ${uniqueCollected}/${totalPossible}${floorRecord}${runsDisplay}`,
+      content: `{bold}{yellow-fg} 마을{/yellow-fg}{/bold}  |  {yellow-fg}골드: ${state.gold}{/yellow-fg}  |  {bold}{cyan-fg}[ ${state.week}주차 ]{/cyan-fg}{/bold}  |  {gray-fg}영웅: ${state.roster.length}명{/gray-fg}  |  수집: ${uniqueCollected}/${totalPossible}${floorRecord}${runsDisplay}${prestigeDisplay}`,
       tags: true,
       border: { type: 'line' },
       style: { fg: 'white', bg: 'black', border: { fg: 'gray' } },
@@ -49,12 +53,14 @@ export class TownScreen extends BaseScreen {
     this.updatePartyDisplay();
 
     // Center panel: Main menu
+    const recruitCost = getRecruitCost(state.prestige);
     const menuItems = [
-      '동료 모집 (300G)',
+      `동료 모집 (${recruitCost}G)`,
       '영웅 도감',
       '파티 편성',
       '장비/인벤토리',
       '상점',
+      '명성 상점',
       '탑 도전',
       '저장',
       '타이틀로',
@@ -107,7 +113,7 @@ export class TownScreen extends BaseScreen {
     });
 
     // Inventory shortcut
-    this.screen.key(['i'], () => {
+    this.registerKey(['i'], () => {
       if (this.subMenu) return;
       this.store.dispatch({ type: 'NAVIGATE', screen: 'inventory' });
     });
@@ -119,20 +125,19 @@ export class TownScreen extends BaseScreen {
   private updatePartyDisplay(): void {
     const state = this.store.getState();
     let content = '';
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const hero = state.party[i];
-      const posLabel = i < 2 ? '{cyan-fg}전열{/cyan-fg}' : '{green-fg}후열{/green-fg}';
+      const col = Math.floor(i / 3) + 1;
+      const posLabel = col === 1 ? '{cyan-fg}전열{/cyan-fg}' : '{green-fg}중열{/green-fg}';
       if (hero) {
         const stars = getStars(hero.rarity);
         const hpColor = hero.stats.hp / hero.stats.maxHp > 0.5 ? 'green' : hero.stats.hp / hero.stats.maxHp > 0.25 ? 'yellow' : 'red';
         const hpBar = formatBar(hero.stats.hp, hero.stats.maxHp, 10);
-        const stressBar = formatBar(hero.stats.stress, 100, 6);
-        const stressColor = hero.stats.stress >= 100 ? 'red' : hero.stats.stress >= 50 ? 'yellow' : 'gray';
         const mcTag = hero.isMainCharacter ? '{bold}{yellow-fg}[주인공]{/yellow-fg}{/bold} ' : '';
         content += `[${i + 1}] ${posLabel} ${mcTag}{yellow-fg}${stars}{/yellow-fg} ${getClassName(hero.class)}\n`;
         content += `  {bold}${hero.name}{/bold} Lv.${hero.level}\n`;
         content += `  HP {${hpColor}-fg}${hpBar}{/${hpColor}-fg} ${hero.stats.hp}/${hero.stats.maxHp}\n`;
-        content += `  ST {${stressColor}-fg}${stressBar}{/${stressColor}-fg} ${hero.stats.stress}\n\n`;
+        content += '\n';
       } else {
         content += `[${i + 1}] ${posLabel} {gray-fg}빈 슬롯{/gray-fg}\n\n`;
       }
@@ -142,16 +147,17 @@ export class TownScreen extends BaseScreen {
 
   private updateInfoForIndex(index: number): void {
     const state = this.store.getState();
+    const recruitCost = getRecruitCost(state.prestige);
     let info = '';
     switch (index) {
       case 0: // Recruit
-        info = '{yellow-fg}영웅 모집{/yellow-fg}\n\n비용: 300 골드\n현재 골드: ' + state.gold + '\n\n새로운 영웅을 고용합니다.\n레어리티: \u2605 60% \u2605\u2605 30% \u2605\u2605\u2605 10%';
+        info = `{yellow-fg}영웅 모집{/yellow-fg}\n\n비용: ${recruitCost} 골드\n현재 골드: ${state.gold}\n\n새로운 영웅을 고용합니다.\n레어리티: \u2605 60% \u2605\u2605 30% \u2605\u2605\u2605 10%`;
         break;
       case 1: // Collection
         info = '{yellow-fg}영웅 도감{/yellow-fg}\n\n수집한 영웅 조합을\n확인합니다.';
         break;
       case 2: // Party
-        info = '{yellow-fg}파티 편성{/yellow-fg}\n\n파티 구성원을\n배치합니다.\n\n현재 파티원: ' + state.party.filter(h => h !== null).length + '/4';
+        info = '{yellow-fg}파티 편성{/yellow-fg}\n\n파티 구성원을\n배치합니다.\n\n현재 파티원: ' + state.party.filter(h => h !== null).length + '/6';
         break;
       case 3: // Inventory
         info = '{yellow-fg}장비/인벤토리{/yellow-fg}\n\n보유 아이템: ' + state.inventory.length + '개';
@@ -159,13 +165,16 @@ export class TownScreen extends BaseScreen {
       case 4: // Shop
         info = '{yellow-fg}상점{/yellow-fg}\n\n무기, 방어구, 장신구,\n보급품을 구매합니다.\n\n현재 골드: ' + state.gold;
         break;
-      case 5: // Tower
+      case 5: // Prestige Shop
+        info = `{yellow-fg}명성 상점{/yellow-fg}\n\n명성 포인트: ${state.prestige.points}\n총 획득: ${state.prestige.totalEarned}\n구매: ${state.prestige.purchased.length}개\n\n런 종료 시 명성을 획득하고\n영구 업그레이드를 구매합니다.`;
+        break;
+      case 6: // Tower
         info = '{yellow-fg}탑 도전{/yellow-fg}\n\n{bold}{red-fg}어둠의 탑{/red-fg}{/bold}\n100층의 탑에 도전합니다.\n\n{magenta-fg}최고 기록: ' + state.maxFloorReached + '층{/magenta-fg}\n\n한번/연속 탐험 선택 가능';
         break;
-      case 6: // Save
+      case 7: // Save
         info = '{yellow-fg}저장{/yellow-fg}\n\n현재 진행 상황을\n저장합니다.';
         break;
-      case 7: // Title
+      case 8: // Title
         info = '{yellow-fg}타이틀로{/yellow-fg}\n\n타이틀 화면으로\n돌아갑니다.';
         break;
     }
@@ -180,9 +189,10 @@ export class TownScreen extends BaseScreen {
       case 2: this.store.dispatch({ type: 'NAVIGATE', screen: 'party_select' }); break;
       case 3: this.showHeroDetailOrInventory(); break;
       case 4: this.showShopMenu(); break;
-      case 5: this.showTowerMenu(); break;
-      case 6: this.saveGame(); break;
-      case 7: this.store.dispatch({ type: 'NAVIGATE', screen: 'title' }); break;
+      case 5: this.showPrestigeShop(); break;
+      case 6: this.showTowerMenu(); break;
+      case 7: this.saveGame(); break;
+      case 8: this.store.dispatch({ type: 'NAVIGATE', screen: 'title' }); break;
     }
   }
 
@@ -198,18 +208,20 @@ export class TownScreen extends BaseScreen {
   private showRecruitMenu(): void {
     this.clearSubMenu();
     const state = this.store.getState();
-    if (state.gold < 300) {
-      this.infoBox.setContent('{red-fg}골드가 부족합니다!{/red-fg}\n\n필요: 300G\n현재: ' + state.gold + 'G');
+    const recruitCost = getRecruitCost(state.prestige);
+    const maxRoster = getMaxRoster(state.prestige);
+    if (state.gold < recruitCost) {
+      this.infoBox.setContent(`{red-fg}골드가 부족합니다!{/red-fg}\n\n필요: ${recruitCost}G\n현재: ${state.gold}G`);
       this.screen.render();
       return;
     }
-    if (state.roster.length >= 12) {
-      this.infoBox.setContent('{red-fg}영웅 목록이 가득 찼습니다!{/red-fg}\n\n최대 12명까지 고용 가능.');
+    if (state.roster.length >= maxRoster) {
+      this.infoBox.setContent(`{red-fg}영웅 목록이 가득 찼습니다!{/red-fg}\n\n최대 ${maxRoster}명까지 고용 가능.`);
       this.screen.render();
       return;
     }
 
-    const items = COMPANION_CLASSES.map(hc => `${getClassName(hc)} (300G)`);
+    const items = COMPANION_CLASSES.map(hc => `${getClassName(hc)} (${recruitCost}G)`);
     items.push('돌아가기');
 
     this.subMenu = blessed.list({
@@ -227,6 +239,14 @@ export class TownScreen extends BaseScreen {
     });
     this.addWidget(this.subMenu);
     this.subMenu.focus();
+
+    this.subMenu.on('select item', (_el: any, idx: number) => {
+      if (idx < COMPANION_CLASSES.length) {
+        const hc = COMPANION_CLASSES[idx]!;
+        this.infoBox.setContent(`{yellow-fg}${getClassName(hc)}{/yellow-fg}\n\n${CLASS_DESCRIPTIONS[hc]}\n\n비용: ${recruitCost}G`);
+        this.screen.render();
+      }
+    });
 
     this.subMenu.on('select', (_item: any, idx: number) => {
       if (idx < COMPANION_CLASSES.length) {
@@ -440,6 +460,85 @@ export class TownScreen extends BaseScreen {
         }
         this.store.dispatch({ type: 'ENTER_TOWER' });
       } else {
+        this.mainMenu.focus();
+        this.screen.render();
+      }
+    });
+
+    this.subMenu.key(['escape'], () => {
+      this.clearSubMenu();
+      this.mainMenu.focus();
+      this.screen.render();
+    });
+
+    this.screen.render();
+  }
+
+  private showPrestigeShop(): void {
+    this.clearSubMenu();
+    const state = this.store.getState();
+
+    const upgradeLabels = PRESTIGE_UPGRADES.map(u => {
+      const owned = state.prestige.purchased.includes(u.id);
+      const canBuy = canBuyUpgrade(state.prestige, u);
+      if (owned) return `{green-fg}[구매완료] ${u.name}{/green-fg}`;
+      if (!canBuy && u.requires && !state.prestige.purchased.includes(u.requires)) {
+        return `{gray-fg}[잠김] ${u.name} (${u.cost}P){/gray-fg}`;
+      }
+      return `${u.name} (${u.cost}P)`;
+    });
+    upgradeLabels.push('돌아가기');
+
+    this.subMenu = blessed.list({
+      top: 'center', left: 'center', width: 45, height: Math.min(upgradeLabels.length + 2, 16),
+      label: ` 명성 상점 (보유: ${state.prestige.points}P) `,
+      items: upgradeLabels,
+      keys: true, vi: false, mouse: true, tags: true,
+      border: { type: 'line' },
+      scrollable: true,
+      style: {
+        fg: 'white', bg: 'black',
+        border: { fg: 'yellow' },
+        selected: { fg: 'black', bg: 'yellow', bold: true },
+        label: { fg: 'yellow' } as any,
+      },
+    });
+    this.addWidget(this.subMenu);
+    this.subMenu.focus();
+
+    this.subMenu.on('select item', (_el: any, idx: number) => {
+      if (idx < PRESTIGE_UPGRADES.length) {
+        const u = PRESTIGE_UPGRADES[idx]!;
+        const owned = state.prestige.purchased.includes(u.id);
+        let detail = `{yellow-fg}${u.name}{/yellow-fg}\n\n${u.description}\n\n비용: ${u.cost}P\n`;
+        if (u.requires) detail += `필요: ${PRESTIGE_UPGRADES.find(p => p.id === u.requires)?.name}\n`;
+        if (owned) detail += '\n{green-fg}이미 구매했습니다.{/green-fg}';
+        this.infoBox.setContent(detail);
+        this.screen.render();
+      }
+    });
+
+    this.subMenu.on('select', (_item: any, idx: number) => {
+      if (idx < PRESTIGE_UPGRADES.length) {
+        const u = PRESTIGE_UPGRADES[idx]!;
+        const currentState = this.store.getState();
+        if (canBuyUpgrade(currentState.prestige, u)) {
+          this.store.dispatch({ type: 'BUY_PRESTIGE_UPGRADE', upgradeId: u.id });
+          savePrestige(this.store.getState().prestige);
+          this.infoBox.setContent(`{green-fg}${u.name}을(를) 구매했습니다!{/green-fg}\n\n남은 명성: ${this.store.getState().prestige.points}P`);
+          // Refresh list
+          this.clearSubMenu();
+          this.showPrestigeShop();
+        } else if (currentState.prestige.purchased.includes(u.id)) {
+          this.infoBox.setContent('{yellow-fg}이미 구매한 업그레이드입니다.{/yellow-fg}');
+        } else if (currentState.prestige.points < u.cost) {
+          this.infoBox.setContent('{red-fg}명성 포인트가 부족합니다!{/red-fg}');
+        } else {
+          this.infoBox.setContent('{red-fg}선행 업그레이드가 필요합니다!{/red-fg}');
+        }
+        this.screen.render();
+      } else {
+        this.clearSubMenu();
         this.mainMenu.focus();
         this.screen.render();
       }

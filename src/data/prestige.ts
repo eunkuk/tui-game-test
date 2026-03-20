@@ -8,8 +8,6 @@ export const PRESTIGE_UPGRADES: PrestigeUpgrade[] = [
   { id: 'start_potions', name: '시작 물약', description: '치유 물약 2개 지급', cost: 60 },
   { id: 'exp_bonus_10', name: '경험치 +10%', description: '전투 경험치 x1.1', cost: 100 },
   { id: 'exp_bonus_20', name: '경험치 +20%', description: '전투 경험치 x1.2 (중첩)', cost: 200, requires: 'exp_bonus_10' },
-  { id: 'extra_torch', name: '추가 횃불', description: '시작 시 횃불 +2개', cost: 40 },
-  { id: 'stress_resist_10', name: '스트레스 내성', description: '스트레스 피해 -10%', cost: 120 },
   { id: 'max_roster_14', name: '대기소 확장', description: '최대 영웅 12→14명', cost: 150 },
 ];
 

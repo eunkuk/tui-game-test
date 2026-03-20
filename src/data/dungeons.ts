@@ -1,5 +1,6 @@
 import type { Room, RoomType, MonsterType } from '../models/types.ts';
 import { randomChoice, randomInt } from '../utils/helpers.ts';
+import { getThemeForFloor, THEME_MONSTER_POOLS } from './themes.ts';
 
 const ROOM_DESCRIPTIONS: Record<RoomType, string[]> = {
   entrance: ['탑의 입구다. 차가운 공기가 스며든다.'],
@@ -42,50 +43,22 @@ export function getDifficulty(floor: number): number {
 }
 
 export function getMonsterPool(floor: number): MonsterType[] {
-  const pool: MonsterType[] = [];
-
-  // floor 1-10
-  if (floor >= 1 && floor <= 10) {
-    pool.push('bone_soldier', 'plague_rat', 'bone_archer');
-  }
-  // floor 8-20
-  if (floor >= 8 && floor <= 20) {
-    pool.push('shadow_lurker', 'cultist_brawler');
-  }
-  // floor 18-35
-  if (floor >= 18 && floor <= 35) {
-    pool.push('cultist_acolyte', 'madman', 'cursed_knight');
-  }
-  // floor 30-55
-  if (floor >= 30 && floor <= 55) {
-    pool.push('dark_mage', 'gargoyle', 'large_carrion_eater');
-  }
-  // floor 50-80
-  if (floor >= 50 && floor <= 80) {
-    pool.push('wraith');
-  }
-  // floor 70-100
-  if (floor >= 70 && floor <= 100) {
-    pool.push('bone_soldier', 'bone_archer', 'cultist_brawler', 'cultist_acolyte',
-      'madman', 'shadow_lurker', 'plague_rat', 'cursed_knight', 'dark_mage',
-      'gargoyle', 'large_carrion_eater', 'wraith', 'necromancer', 'bone_captain');
-  }
-
-  // Deduplicate
+  const theme = getThemeForFloor(floor);
+  const pool = [...THEME_MONSTER_POOLS[theme]];
   return [...new Set(pool)];
 }
 
 export function getBossType(floor: number): MonsterType {
   if (floor === 10) return 'bone_captain';
   if (floor === 20) return 'large_carrion_eater';
-  if (floor === 30) return 'cursed_knight';
-  if (floor === 40) return 'gargoyle';
-  if (floor === 50) return 'necromancer';
-  if (floor === 60) return 'wraith';
+  if (floor === 30) return 'necromancer';
+  if (floor === 40) return 'frost_titan';
+  if (floor === 50) return 'flame_demon';
+  if (floor === 60) return 'void_lord';
   if (floor >= 70 && floor <= 90) {
-    return randomChoice<MonsterType>(['necromancer', 'wraith', 'gargoyle', 'cursed_knight']);
+    return randomChoice<MonsterType>(['necromancer', 'frost_titan', 'flame_demon', 'void_lord', 'large_carrion_eater', 'bone_captain']);
   }
-  if (floor === 100) return 'necromancer';
+  if (floor === 100) return 'void_lord';
   // Default fallback for non-standard boss floors
   return 'bone_captain';
 }

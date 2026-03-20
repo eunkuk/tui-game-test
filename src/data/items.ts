@@ -10,11 +10,6 @@ export function createItemCopy(item: Item): Item {
 // ============================================================
 export const SUPPLY_ITEMS: Item[] = [
   {
-    id: 'torch', name: '횃불', type: 'supply', rarity: 'common',
-    description: '어둠을 밝힌다. 횃불 레벨을 25 증가.',
-    modifiers: [], value: 75, consumable: true, torchAmount: 25,
-  },
-  {
     id: 'food', name: '식량', type: 'supply', rarity: 'common',
     description: '배고픔을 해소한다. HP 10 회복.',
     modifiers: [], value: 75, consumable: true, healAmount: 10,
@@ -28,11 +23,6 @@ export const SUPPLY_ITEMS: Item[] = [
     id: 'antivenom', name: '해독제', type: 'supply', rarity: 'common',
     description: '역병을 치료하고 HP를 약간 회복한다.',
     modifiers: [], value: 100, consumable: true, healAmount: 5,
-  },
-  {
-    id: 'holy_water', name: '성수', type: 'supply', rarity: 'uncommon',
-    description: '스트레스를 줄여준다.',
-    modifiers: [], value: 150, consumable: true, stressHealAmount: 10,
   },
   {
     id: 'medicinal_herbs', name: '약초', type: 'supply', rarity: 'uncommon',
@@ -56,11 +46,6 @@ export const POTION_ITEMS: Item[] = [
     modifiers: [], value: 300, consumable: true, healAmount: 35,
   },
   {
-    id: 'stress_potion', name: '진정제', type: 'potion', rarity: 'uncommon',
-    description: '마음을 안정시키는 약.',
-    modifiers: [], value: 250, consumable: true, stressHealAmount: 20,
-  },
-  {
     id: 'attack_potion', name: '힘의 물약', type: 'potion', rarity: 'uncommon',
     description: '일시적으로 공격력을 높인다.',
     modifiers: [], value: 280, consumable: true,
@@ -81,7 +66,7 @@ export const POTION_ITEMS: Item[] = [
   {
     id: 'full_restore', name: '완전 회복약', type: 'potion', rarity: 'rare',
     description: 'HP를 완전히 회복하고 스트레스를 줄인다.',
-    modifiers: [], value: 600, consumable: true, healAmount: 999, stressHealAmount: 30,
+    modifiers: [], value: 600, consumable: true, healAmount: 999,
   },
   {
     id: 'elixir', name: '영웅의 영약', type: 'potion', rarity: 'legendary',

@@ -19,6 +19,7 @@ import { getHeroAutoAction } from '../engine/hero-ai.ts';
 
 export class CombatScreen extends BaseScreen {
   private gridBox!: blessed.Widgets.BoxElement;
+  private infoBox!: blessed.Widgets.BoxElement;
   private logBox!: blessed.Widgets.BoxElement;
   private headerBox!: blessed.Widgets.BoxElement;
   private turnOrderBox!: blessed.Widgets.BoxElement;
@@ -67,10 +68,10 @@ export class CombatScreen extends BaseScreen {
       style: { bg: 'black' },
     });
 
-    // === Left column (33%) ===
+    // === Left column (25%) ===
     // Header
     this.headerBox = this.createBox({
-      top: 0, left: 0, width: '33%', height: 3,
+      top: 0, left: 0, width: '25%', height: 3,
       tags: true,
       border: { type: 'line' },
       style: { fg: 'white', bg: 'black', border: { fg: 'red' } },
@@ -78,7 +79,7 @@ export class CombatScreen extends BaseScreen {
 
     // Turn order queue
     this.turnOrderBox = this.createBox({
-      top: 3, left: 0, width: '33%', height: 3,
+      top: 3, left: 0, width: '25%', height: 3,
       tags: true,
       border: { type: 'line' },
       label: ' 순서 ',
@@ -87,7 +88,7 @@ export class CombatScreen extends BaseScreen {
 
     // Combat log (fills remaining left column height)
     this.logBox = this.createBox({
-      top: 6, left: 0, width: '33%', bottom: 1,
+      top: 6, left: 0, width: '25%', bottom: 1,
       label: ' 전투 기록 ',
       tags: true,
       border: { type: 'line' },
@@ -96,14 +97,24 @@ export class CombatScreen extends BaseScreen {
       style: { fg: 'gray', bg: 'black', border: { fg: 'gray' }, label: { fg: 'gray' } } as any,
     });
 
-    // === Right column (67%) ===
+    // === Center column (50%) ===
     // Grid visualization area
     this.gridBox = this.createBox({
-      top: 0, left: '33%', width: '67%', bottom: 1,
+      top: 0, left: '25%', width: '50%', bottom: 1,
       label: ' 전장 ',
       tags: true,
       border: { type: 'line' },
       style: { fg: 'white', bg: 'black', border: { fg: 'yellow' }, label: { fg: 'yellow' } } as any,
+    });
+
+    // === Right column (25%) ===
+    // Combat info panel
+    this.infoBox = this.createBox({
+      top: 0, left: '75%', width: '25%', bottom: 1,
+      label: ' 전투 정보 ',
+      tags: true,
+      border: { type: 'line' },
+      style: { fg: 'white', bg: 'black', border: { fg: 'cyan' }, label: { fg: 'cyan' } } as any,
     });
 
     // === Bottom (100%) ===
@@ -125,6 +136,7 @@ export class CombatScreen extends BaseScreen {
     this.updateHeader();
     this.updateTurnOrder();
     this.updateGrid();
+    this.updateInfo();
     this.updateLog();
     this.screen.render();
   }
@@ -300,19 +312,7 @@ export class CombatScreen extends BaseScreen {
     const enemyGrid = this.buildGridSide(enemyUnits, true);
     const allyGrid = this.buildGridSide(allyUnits, false);
 
-    // Current turn indicator
-    let turnLabel = '';
-    if (currentTurn) {
-      if (currentTurn.isHero) {
-        const hero = this.combat.heroes.find(h => h.id === currentTurn.id);
-        turnLabel = hero ? `{yellow-fg}> ${hero.name}의 차례{/yellow-fg}` : '';
-      } else {
-        const monster = this.combat.monsters.find(m => m.id === currentTurn.id);
-        turnLabel = monster ? `{red-fg}> ${monster.name}의 차례{/red-fg}` : '';
-      }
-    }
-
-    // Compose full grid content
+    // Compose grid-only content
     let content = '';
     content += ` {bold}{red-fg}[ 적 진영 ]{/red-fg}{/bold}              {bold}{cyan-fg}[ 아군 진영 ]{/cyan-fg}{/bold}\n`;
 
@@ -324,31 +324,67 @@ export class CombatScreen extends BaseScreen {
       content += `${eLine}  ${aLine}\n`;
     }
 
-    // Unit details below the grid
-    content += '\n';
-    content += turnLabel + '\n';
-
-    // Show status effects summary for alive units
-    const aliveEnemies = this.combat.monsters.filter(m => m.stats.hp > 0);
-    const aliveHeroes = this.combat.heroes.filter(h => h.stats.hp > 0 || h.isDeathsDoor);
-
-    for (const m of aliveEnemies) {
-      const effects = this.formatEffects(m.statusEffects);
-      const hpPct = m.stats.hp / m.stats.maxHp;
-      const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
-      const boss = m.isBoss ? '{red-fg}[B]{/red-fg}' : '';
-      content += ` ${boss}{red-fg}${m.name}{/red-fg} {${hpColor}-fg}${m.stats.hp}/${m.stats.maxHp}{/${hpColor}-fg} ${effects}\n`;
-    }
-    for (const h of aliveHeroes) {
-      const effects = this.formatEffects(h.statusEffects);
-      const hpPct = h.stats.hp / h.stats.maxHp;
-      const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
-      const deathsDoor = h.isDeathsDoor ? '{red-fg}[죽문]{/red-fg}' : '';
-      const mc = h.isMainCharacter ? '{yellow-fg}[MC]{/yellow-fg}' : '';
-      content += ` ${mc}{cyan-fg}${h.name}{/cyan-fg} {${hpColor}-fg}${h.stats.hp}/${h.stats.maxHp}{/${hpColor}-fg} ${deathsDoor}${effects}\n`;
-    }
-
     this.gridBox.setContent(content);
+  }
+
+  private updateInfo(): void {
+    const currentTurn = this.combat.turnOrder[this.combat.currentTurnIndex];
+
+    // Current turn indicator
+    let turnLabel = '';
+    if (currentTurn) {
+      if (currentTurn.isHero) {
+        const hero = this.combat.heroes.find(h => h.id === currentTurn.id);
+        turnLabel = hero ? `{yellow-fg}▶ ${hero.name}의 차례{/yellow-fg}` : '';
+      } else {
+        const monster = this.combat.monsters.find(m => m.id === currentTurn.id);
+        turnLabel = monster ? `{red-fg}▶ ${monster.name}의 차례{/red-fg}` : '';
+      }
+    }
+
+    let content = '';
+    content += turnLabel + '\n\n';
+
+    // Enemy details
+    const aliveEnemies = this.combat.monsters.filter(m => m.stats.hp > 0);
+    if (aliveEnemies.length > 0) {
+      content += ' {bold}{red-fg}[ 적 ]{/red-fg}{/bold}\n';
+      for (const m of aliveEnemies) {
+        const effects = this.formatEffects(m.statusEffects);
+        const hpPct = m.stats.hp / m.stats.maxHp;
+        const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
+        const boss = m.isBoss ? '{red-fg}[B]{/red-fg}' : '';
+        const barLen = 10;
+        const filled = Math.round(hpPct * barLen);
+        const hpBar = `{${hpColor}-fg}${'█'.repeat(filled)}{/${hpColor}-fg}{gray-fg}${'░'.repeat(barLen - filled)}{/gray-fg}`;
+        content += ` ${boss}{red-fg}${m.name}{/red-fg}\n`;
+        content += ` ${hpBar} {${hpColor}-fg}${m.stats.hp}/${m.stats.maxHp}{/${hpColor}-fg}\n`;
+        if (effects) content += ` ${effects}\n`;
+      }
+    }
+
+    content += '\n';
+
+    // Ally details
+    const aliveHeroes = this.combat.heroes.filter(h => h.stats.hp > 0 || h.isDeathsDoor);
+    if (aliveHeroes.length > 0) {
+      content += ' {bold}{cyan-fg}[ 아군 ]{/cyan-fg}{/bold}\n';
+      for (const h of aliveHeroes) {
+        const effects = this.formatEffects(h.statusEffects);
+        const hpPct = h.stats.hp / h.stats.maxHp;
+        const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
+        const deathsDoor = h.isDeathsDoor ? '{red-fg}[죽문]{/red-fg}' : '';
+        const mc = h.isMainCharacter ? '{yellow-fg}[MC]{/yellow-fg}' : '';
+        const barLen = 10;
+        const filled = Math.round(hpPct * barLen);
+        const hpBar = `{${hpColor}-fg}${'█'.repeat(filled)}{/${hpColor}-fg}{gray-fg}${'░'.repeat(barLen - filled)}{/gray-fg}`;
+        content += ` ${mc}{cyan-fg}${h.name}{/cyan-fg} ${deathsDoor}\n`;
+        content += ` ${hpBar} {${hpColor}-fg}${h.stats.hp}/${h.stats.maxHp}{/${hpColor}-fg}\n`;
+        if (effects) content += ` ${effects}\n`;
+      }
+    }
+
+    this.infoBox.setContent(content);
   }
 
   private formatEffects(effects: { type: string; duration: number }[]): string {

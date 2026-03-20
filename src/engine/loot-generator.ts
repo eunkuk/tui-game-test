@@ -3,15 +3,9 @@ import { randomInt, randomChoice, percentChance } from '../utils/helpers.ts';
 import { SUPPLY_ITEMS, POTION_ITEMS, SHOP_WEAPONS, SHOP_ARMOR, SHOP_TRINKETS, createItemCopy } from '../data/items.ts';
 
 // Generate loot for combat victory based on floor number
-export function generateCombatLoot(floor: number, torchLevel: number): { items: Item[]; gold: number } {
+export function generateCombatLoot(floor: number): { items: Item[]; gold: number } {
   // Gold scales with floor
   let gold = 30 + floor * 8 + randomInt(0, 50);
-
-  // Low torch bonus
-  const lowTorch = torchLevel < 25;
-  if (lowTorch) {
-    gold = Math.round(gold * 1.5);
-  }
 
   const items: Item[] = [];
   const itemRolls = randomInt(1, 3);
@@ -21,8 +15,7 @@ export function generateCombatLoot(floor: number, torchLevel: number): { items: 
   if (floor > 50) rarityBonus = 20;
   else if (floor > 20) rarityBonus = 10;
 
-  const torchBonus = lowTorch ? 15 : 0;
-  const totalBonus = rarityBonus + torchBonus;
+  const totalBonus = rarityBonus;
 
   for (let i = 0; i < itemRolls; i++) {
     const roll = randomInt(1, 100);
@@ -139,10 +132,9 @@ export function generateTreasureLoot(floor: number): { items: Item[]; gold: numb
 }
 
 // Generate curio interaction result
-export function generateCurioResult(): { items: Item[]; gold: number; stress: number; damage: number; description: string } {
+export function generateCurioResult(): { items: Item[]; gold: number; damage: number; description: string } {
   const items: Item[] = [];
   let gold = 0;
-  let stress = 0;
   let damage = 0;
   let description = '';
 
@@ -163,8 +155,8 @@ export function generateCurioResult(): { items: Item[]; gold: number; stress: nu
         }
         break;
       case 3:
-        stress = -randomInt(5, 15);
-        description = '마음이 안정되는 것을 느꼈습니다.';
+        gold = randomInt(20, 60);
+        description = '숨겨진 금화를 발견했습니다!';
         break;
     }
   } else {
@@ -175,16 +167,15 @@ export function generateCurioResult(): { items: Item[]; gold: number; stress: nu
         description = '함정이 작동했습니다!';
         break;
       case 2:
-        stress = randomInt(10, 20);
+        damage = randomInt(3, 8);
         description = '끔찍한 환상을 보았습니다...';
         break;
       case 3:
         damage = randomInt(3, 8);
-        stress = randomInt(5, 10);
         description = '저주받은 물건이었습니다!';
         break;
     }
   }
 
-  return { items, gold, stress, damage, description };
+  return { items, gold, damage, description };
 }

@@ -173,11 +173,6 @@ export function checkAutoSafety(heroes: Hero[]): string | null {
     return '파티 HP 위험! 자동 모드 중지.';
   }
 
-  // Stop if any hero has stress >= 90 (about to get affliction)
-  const highStress = alive.find(h => h.stats.stress >= 90 && !h.affliction && !h.virtue);
-  if (highStress) {
-    return `${highStress.name}의 스트레스가 위험! 자동 모드 중지.`;
-  }
 
   return null;
 }

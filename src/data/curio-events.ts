@@ -3,7 +3,6 @@ import { percentChance, randomInt } from '../utils/helpers.ts';
 export interface CurioOutcome {
   description: string;
   hpChange?: number;
-  stressChange?: number;
   goldChange?: number;
   weight: number; // higher = more likely
 }
@@ -29,8 +28,8 @@ export const CURIO_EVENTS: CurioEvent[] = [
       {
         text: '기도하기',
         outcomes: [
-          { description: '평온함이 밀려온다.', stressChange: -10, weight: 60 },
-          { description: '저주가 되돌아왔다!', stressChange: 15, weight: 40 },
+          { description: '평온함이 밀려온다.', weight: 60 },
+          { description: '저주가 되돌아왔다!', weight: 40 },
         ],
       },
       {
@@ -56,8 +55,8 @@ export const CURIO_EVENTS: CurioEvent[] = [
       {
         text: '읽기',
         outcomes: [
-          { description: '지혜를 얻었다. 마음이 편안해진다.', stressChange: -5, weight: 55 },
-          { description: '금서였다! 정신이 혼란해진다.', stressChange: 10, weight: 45 },
+          { description: '지혜를 얻었다. 마음이 편안해진다.', weight: 55 },
+          { description: '금서였다! 정신이 혼란해진다.', weight: 45 },
         ],
       },
       {
@@ -83,14 +82,14 @@ export const CURIO_EVENTS: CurioEvent[] = [
       {
         text: '마시기',
         outcomes: [
-          { description: '상처가 치유된다!', hpChange: 8, stressChange: -5, weight: 60 },
-          { description: '독이 섞여 있었다!', hpChange: -5, stressChange: 5, weight: 40 },
+          { description: '상처가 치유된다!', hpChange: 8, weight: 60 },
+          { description: '독이 섞여 있었다!', hpChange: -5, weight: 40 },
         ],
       },
       {
         text: '동전 던지기',
         outcomes: [
-          { description: '행운의 빛이 감돈다.', goldChange: 40, stressChange: -3, weight: 50 },
+          { description: '행운의 빛이 감돈다.', goldChange: 40, weight: 50 },
           { description: '아무 일도 일어나지 않았다.', goldChange: -10, weight: 50 },
         ],
       },
@@ -111,13 +110,13 @@ export const CURIO_EVENTS: CurioEvent[] = [
         text: '뒤지기',
         outcomes: [
           { description: '금화를 발견했다!', goldChange: 35, weight: 65 },
-          { description: '함정이 발동! 독가스!', hpChange: -4, stressChange: 8, weight: 35 },
+          { description: '함정이 발동! 독가스!', hpChange: -4, weight: 35 },
         ],
       },
       {
         text: '묵념하기',
         outcomes: [
-          { description: '마음이 안정된다.', stressChange: -8, weight: 100 },
+          { description: '마음이 안정된다.', weight: 100 },
         ],
       },
       {
@@ -137,14 +136,14 @@ export const CURIO_EVENTS: CurioEvent[] = [
         text: '부수기',
         outcomes: [
           { description: '보물이 가득했다!', goldChange: 60, weight: 50 },
-          { description: '함정이 발동!', hpChange: -6, stressChange: 5, weight: 50 },
+          { description: '함정이 발동!', hpChange: -6, weight: 50 },
         ],
       },
       {
         text: '조심스럽게 열기',
         outcomes: [
           { description: '금화가 약간 있었다.', goldChange: 25, weight: 70 },
-          { description: '비어있었다.', stressChange: 3, weight: 30 },
+          { description: '비어있었다.', weight: 30 },
         ],
       },
       {
@@ -163,8 +162,8 @@ export const CURIO_EVENTS: CurioEvent[] = [
       {
         text: '만지기',
         outcomes: [
-          { description: '힘이 흘러들어온다!', hpChange: 5, stressChange: -5, weight: 50 },
-          { description: '저주가 덮쳤다!', stressChange: 12, weight: 50 },
+          { description: '힘이 흘러들어온다!', hpChange: 5, weight: 50 },
+          { description: '저주가 덮쳤다!', weight: 50 },
         ],
       },
       {

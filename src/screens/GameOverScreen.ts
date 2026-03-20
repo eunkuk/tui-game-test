@@ -1,11 +1,21 @@
 import blessed from 'blessed';
 import { BaseScreen } from './BaseScreen.ts';
 import { SKULL_ART, VICTORY_ART } from '../data/ascii-art.ts';
+import { calculatePrestigeGain } from '../data/prestige.ts';
+import { savePrestige } from '../engine/save-load.ts';
 
 export class GameOverScreen extends BaseScreen {
   render(): void {
     const state = this.store.getState();
     const isVictory = state.gameWon;
+
+    // Calculate and award prestige
+    const bossKills = Math.floor(state.maxFloorReached / 10);
+    const prestigeGain = calculatePrestigeGain(state.maxFloorReached, bossKills, state.week);
+    if (prestigeGain > 0) {
+      this.store.dispatch({ type: 'EARN_PRESTIGE', amount: prestigeGain });
+      savePrestige(this.store.getState().prestige);
+    }
 
     // Permadeath: delete save on game over (non-victory)
     if (!isVictory) {
@@ -45,11 +55,14 @@ export class GameOverScreen extends BaseScreen {
     });
 
     // Stats summary
+    const currentPrestige = this.store.getState().prestige;
     const stats = [
       `{cyan-fg}주차:{/cyan-fg} ${state.week}`,
       `{cyan-fg}최고 층:{/cyan-fg} ${state.maxFloorReached}`,
       `{cyan-fg}연속 완료:{/cyan-fg} ${state.runsCompleted}회`,
       `{cyan-fg}보유 골드:{/cyan-fg} ${state.gold}`,
+      `{yellow-fg}획득 명성:{/yellow-fg} +${prestigeGain}`,
+      `{yellow-fg}총 명성:{/yellow-fg} ${currentPrestige.points}`,
     ];
 
     this.createBox({

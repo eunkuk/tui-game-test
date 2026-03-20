@@ -56,9 +56,7 @@ export function showLootPopup(
     info += `  {cyan-fg}${modText}{/cyan-fg}\n`;
   }
   if (item.healAmount) info += `  {green-fg}HP 회복: ${item.healAmount}{/green-fg}\n`;
-  if (item.stressHealAmount) info += `  {cyan-fg}스트레스 감소: ${item.stressHealAmount}{/cyan-fg}\n`;
   if (item.buffEffect) info += `  {yellow-fg}버프: ${item.buffEffect.stat} +${item.buffEffect.value} (${item.buffEffect.duration}턴){/yellow-fg}\n`;
-  if (item.torchAmount) info += `  {yellow-fg}횃불 밝기: +${item.torchAmount}{/yellow-fg}\n`;
   info += `  {yellow-fg}가치: ${item.value}G{/yellow-fg}\n`;
 
   info += `\n  ──────────────────────────\n`;
@@ -142,7 +140,7 @@ export function showLootPopup(
         const compStr = comparison ? ` ${comparison}` : '';
         return `${h.name} (${getClassName(h.class)}) ${currentStr} → ${item.name}${compStr}`;
       } else {
-        return `${h.name} (${getClassName(h.class)}) HP ${h.stats.hp}/${h.stats.maxHp} ST ${h.stats.stress}`;
+        return `${h.name} (${getClassName(h.class)}) HP ${h.stats.hp}/${h.stats.maxHp}`;
       }
     });
 

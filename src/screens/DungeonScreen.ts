@@ -5,12 +5,16 @@ import { getClassName, getStars } from '../data/heroes.ts';
 import { formatBar, randomInt, randomChoice, percentChance, clamp } from '../utils/helpers.ts';
 import { createMonsterGroupScaled } from '../engine/monster-factory.ts';
 import { createItemCopy, SUPPLY_ITEMS } from '../data/items.ts';
-import { applyStress } from '../engine/stress-engine.ts';
 import { getDifficulty, getStatMultiplier } from '../data/dungeons.ts';
 import { updateFOV, getFOVRadius } from '../engine/map-generator.ts';
 import { findNextTarget, computePath } from '../engine/auto-explorer.ts';
 import { generateTreasureLoot } from '../engine/loot-generator.ts';
 import { showLootPopup } from '../ui/LootPopup.ts';
+import { getThemeConfig } from '../data/themes.ts';
+import { CURIO_EVENTS, resolveOutcome } from '../data/curio-events.ts';
+import { castRays, findSpecialTiles } from '../engine/raycaster.ts';
+import { renderFPS } from '../engine/fps-renderer.ts';
+import type { DungeonTheme } from '../models/types.ts';
 
 export class DungeonScreen extends BaseScreen {
   private mapBox!: blessed.Widgets.BoxElement;
@@ -27,6 +31,10 @@ export class DungeonScreen extends BaseScreen {
   private paused = false;
   private lootPopup: { destroy: () => void; active: boolean } | null = null;
   private autoMode = true; // true=자동, false=수동
+  private modalActive = false;
+  private fpsMode = false;
+  private minimapVisible = true;
+  private minimapBox!: blessed.Widgets.BoxElement;
 
   destroy(): void {
     this.destroyed = true;
@@ -72,6 +80,16 @@ export class DungeonScreen extends BaseScreen {
       label: ' 지도 ',
       style: { fg: 'white', bg: 'black', border: { fg: 'gray' }, label: { fg: 'gray' } } as any,
     });
+    // Minimap (FPS 모드용, 기본 숨김)
+    this.minimapBox = this.createBox({
+      top: 3, right: 1, width: 17, height: 10,
+      tags: true,
+      border: { type: 'line' },
+      label: ' MAP ',
+      style: { fg: 'gray', bg: 'black', border: { fg: 'gray' }, label: { fg: 'gray' } } as any,
+    });
+    this.minimapBox.hide();
+
     this.renderMap();
 
     // Party status
@@ -112,9 +130,12 @@ export class DungeonScreen extends BaseScreen {
 
   private updateHint(): void {
     if (this.autoMode) {
-      this.hintBox.setContent('{gray-fg}1/2/3:속도  Space:일시정지  Tab:수동모드  I:인벤  Esc:탈출{/gray-fg}');
+      const viewKey = this.fpsMode ? 'V:탑뷰 M:미니맵' : 'V:1인칭';
+      this.hintBox.setContent(`{gray-fg}1/2/3:속도  Space:일시정지  Tab:수동모드  ${viewKey}  I:인벤  Esc:탈출{/gray-fg}`);
+    } else if (this.fpsMode) {
+      this.hintBox.setContent('{gray-fg}W:전진 S:후퇴 A:좌회전 D:우회전 V:탑뷰 M:미니맵 Tab:자동 I:인벤 Esc:탈출{/gray-fg}');
     } else {
-      this.hintBox.setContent('{gray-fg}↑↓←→/WASD:이동  Tab:자동모드  I:인벤  Esc:탈출{/gray-fg}');
+      this.hintBox.setContent('{gray-fg}↑↓←→/WASD:이동  V:1인칭  Tab:자동모드  I:인벤  Esc:탈출{/gray-fg}');
     }
   }
 
@@ -123,20 +144,36 @@ export class DungeonScreen extends BaseScreen {
     const tower = state.tower;
     if (!tower) return;
 
-    const torchColor = tower.torchLevel > 50 ? 'yellow' : tower.torchLevel > 25 ? '#ff8800' : 'red';
-    const torchBar = formatBar(tower.torchLevel, 100, 10);
-    const torchWarning = tower.torchLevel <= 25 ? ' {red-fg}[위험!]{/red-fg}' : '';
     const speedBtns = [1, 2, 3].map(s => s === this.speed ? `{yellow-fg}[${s}x]{/yellow-fg}` : `{gray-fg}[${s}x]{/gray-fg}`).join(' ');
     const continuous = state.continuousRun ? '  {yellow-fg}[연속]{/yellow-fg}' : '';
     const diff = getDifficulty(tower.currentFloor);
     const stars = '\u2605'.repeat(diff);
     const pauseLabel = this.paused ? '  {bold}{red-fg}[일시정지]{/red-fg}{/bold}' : '';
     const modeLabel = this.autoMode ? '{cyan-fg}[자동]{/cyan-fg}' : '{yellow-fg}[수동]{/yellow-fg}';
+    const viewLabel = this.fpsMode ? '{magenta-fg}[1인칭]{/magenta-fg}' : '{cyan-fg}[탑뷰]{/cyan-fg}';
 
-    this.headerBox.setContent(` {bold}{red-fg}어둠의 탑{/red-fg}{/bold} ${tower.currentFloor}층  |  최고 ${state.maxFloorReached}층  |  난이도 {yellow-fg}${stars}{/yellow-fg}  |  횃불 {${torchColor}-fg}${torchBar}{/${torchColor}-fg} ${tower.torchLevel}%${torchWarning}  |  ${speedBtns}  ${modeLabel}${continuous}${pauseLabel}`);
+    const tc = getThemeConfig(tower.theme || 'catacombs');
+    const envLabel = tc.envEffect ? ` {red-fg}[${tc.name}]{/red-fg}` : ` {cyan-fg}[${tc.name}]{/cyan-fg}`;
+
+    this.headerBox.setContent(` {bold}{red-fg}어둠의 탑{/red-fg}{/bold} ${tower.currentFloor}층${envLabel}  |  최고 ${state.maxFloorReached}층  |  난이도 {yellow-fg}${stars}{/yellow-fg}  |  ${speedBtns}  ${modeLabel} ${viewLabel}${continuous}${pauseLabel}`);
   }
 
   private renderMap(): void {
+    if (this.fpsMode) {
+      this.renderFPSView();
+      if (this.minimapVisible) {
+        this.renderMinimap();
+        this.minimapBox.show();
+      } else {
+        this.minimapBox.hide();
+      }
+    } else {
+      this.renderTopDownMap();
+      this.minimapBox.hide();
+    }
+  }
+
+  private renderTopDownMap(): void {
     const state = this.store.getState();
     const tower = state.tower;
     if (!tower) return;
@@ -179,7 +216,100 @@ export class DungeonScreen extends BaseScreen {
     this.mapBox.setContent(content);
   }
 
+  private renderFPSView(): void {
+    const state = this.store.getState();
+    const tower = state.tower;
+    if (!tower) return;
+
+    const fm = tower.floorMap;
+    const viewWidth = (typeof this.mapBox.width === 'number' ? this.mapBox.width : 80) - 2;
+    const viewHeight = (typeof this.mapBox.height === 'number' ? this.mapBox.height : 14) - 2;
+    const angle = fm.playerAngle ?? 0;
+
+    const hits = castRays(fm.tiles, fm.width, fm.height, fm.playerX, fm.playerY, angle, viewWidth);
+    const specials = findSpecialTiles(fm.tiles, fm.width, fm.height, fm.playerX, fm.playerY, angle, viewWidth);
+    const content = renderFPS(hits, specials, viewWidth, viewHeight, tower.theme || 'catacombs');
+    this.mapBox.setContent(content);
+  }
+
+  private renderMinimap(): void {
+    const state = this.store.getState();
+    const tower = state.tower;
+    if (!tower) return;
+
+    const fm = tower.floorMap;
+    const mapW = 15;
+    const mapH = 8;
+    const camX = Math.max(0, Math.min(fm.playerX - Math.floor(mapW / 2), fm.width - mapW));
+    const camY = Math.max(0, Math.min(fm.playerY - Math.floor(mapH / 2), fm.height - mapH));
+
+    // 8방향 화살표
+    const angle = fm.playerAngle ?? 0;
+    const norm = ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const idx = Math.round(norm / (Math.PI / 4)) % 8;
+    const dirChars = ['\u25B8', '\u25E2', '\u25BE', '\u25E3', '\u25C2', '\u25E4', '\u25B4', '\u25E5']; // ▸◢▾◣◂◤▴◥
+    const playerChar = dirChars[idx] || '@';
+
+    // 시야선: 바라보는 방향 2칸 표시 (벽이 아닌 경우)
+    const dxDir = Math.round(Math.cos(angle));
+    const dyDir = Math.round(Math.sin(angle));
+    const fovDots = new Set<string>();
+    for (let step = 1; step <= 2; step++) {
+      const fx = fm.playerX + dxDir * step;
+      const fy = fm.playerY + dyDir * step;
+      if (fy >= 0 && fy < fm.height && fx >= 0 && fx < fm.width) {
+        const fTile = fm.tiles[fy]![fx]!;
+        if (fTile.type === 'wall') break;
+        fovDots.add(`${fx},${fy}`);
+      } else break;
+    }
+
+    let content = '';
+    for (let sy = 0; sy < mapH && sy + camY < fm.height; sy++) {
+      const y = sy + camY;
+      let line = '';
+      for (let sx = 0; sx < mapW && sx + camX < fm.width; sx++) {
+        const x = sx + camX;
+        const tile = fm.tiles[y]![x]!;
+
+        if (x === fm.playerX && y === fm.playerY) {
+          line += `{bold}{yellow-fg}${playerChar}{/yellow-fg}{/bold}`;
+          continue;
+        }
+
+        // 시야선 표시
+        if (fovDots.has(`${x},${y}`) && tile.explored) {
+          line += '{yellow-fg}\u00B7{/yellow-fg}';
+          continue;
+        }
+
+        if (!tile.explored) {
+          line += ' ';
+          continue;
+        }
+
+        switch (tile.type) {
+          case 'wall': line += '{gray-fg}#{/gray-fg}'; break;
+          case 'exit': line += '{cyan-fg}>{/cyan-fg}'; break;
+          case 'combat': line += tile.cleared ? '{#555555-fg}.{/#555555-fg}' : '{red-fg}!{/red-fg}'; break;
+          case 'boss': line += tile.cleared ? '{#555555-fg}.{/#555555-fg}' : '{red-fg}B{/red-fg}'; break;
+          case 'treasure': line += tile.cleared ? '{#555555-fg}.{/#555555-fg}' : '{yellow-fg}${/yellow-fg}'; break;
+          default: line += '{#555555-fg}.{/#555555-fg}'; break;
+        }
+      }
+      content += line + '\n';
+    }
+
+    this.minimapBox.setContent(content);
+  }
+
+  private getTheme(): DungeonTheme {
+    const state = this.store.getState();
+    return state.tower?.theme || 'catacombs';
+  }
+
   private getTileChar(tile: { type: TileType; cleared: boolean }): string {
+    const tc = getThemeConfig(this.getTheme());
     if (tile.cleared) {
       if (tile.type === 'entrance' || tile.type === 'floor') {
         return '{#555555-fg}.{/#555555-fg}';
@@ -188,41 +318,42 @@ export class DungeonScreen extends BaseScreen {
     }
 
     switch (tile.type) {
-      case 'wall': return '{gray-fg}#{/gray-fg}';
-      case 'floor': return '{#888888-fg}.{/#888888-fg}';
-      case 'entrance': return '{#888888-fg}.{/#888888-fg}';
+      case 'wall': return `{${tc.wallColor}-fg}${tc.wallChar}{/${tc.wallColor}-fg}`;
+      case 'floor': return `{${tc.floorColor}-fg}${tc.floorChar}{/${tc.floorColor}-fg}`;
+      case 'entrance': return `{${tc.floorColor}-fg}${tc.floorChar}{/${tc.floorColor}-fg}`;
       case 'exit': return '{bold}{cyan-fg}>{/cyan-fg}{/bold}';
       case 'combat': return '{red-fg}!{/red-fg}';
       case 'treasure': return '{yellow-fg}${/yellow-fg}';
       case 'trap': return '{red-fg}^{/red-fg}';
       case 'curio': return '{magenta-fg}?{/magenta-fg}';
       case 'boss': return '{bold}{red-fg}B{/red-fg}{/bold}';
-      default: return '.';
+      default: return tc.floorChar;
     }
   }
 
   private getDimTileChar(tile: { type: TileType; cleared: boolean }): string {
+    const tc = getThemeConfig(this.getTheme());
     if (tile.cleared) {
-      return '{#444444-fg}.{/#444444-fg}';
+      return `{${tc.dimFloorColor}-fg}.{/${tc.dimFloorColor}-fg}`;
     }
     switch (tile.type) {
-      case 'wall': return '{#444444-fg}#{/#444444-fg}';
-      case 'floor': return '{#444444-fg}.{/#444444-fg}';
-      case 'entrance': return '{#444444-fg}.{/#444444-fg}';
+      case 'wall': return `{${tc.dimWallColor}-fg}${tc.wallChar}{/${tc.dimWallColor}-fg}`;
+      case 'floor': return `{${tc.dimFloorColor}-fg}${tc.floorChar}{/${tc.dimFloorColor}-fg}`;
+      case 'entrance': return `{${tc.dimFloorColor}-fg}${tc.floorChar}{/${tc.dimFloorColor}-fg}`;
       case 'exit': return '{#448888-fg}>{/#448888-fg}';
       case 'combat': return '{#884444-fg}!{/#884444-fg}';
       case 'treasure': return '{#888844-fg}${/#888844-fg}';
       case 'trap': return '{#884444-fg}^{/#884444-fg}';
       case 'curio': return '{#664488-fg}?{/#664488-fg}';
       case 'boss': return '{#884444-fg}B{/#884444-fg}';
-      default: return '{#444444-fg}.{/#444444-fg}';
+      default: return `{${tc.dimFloorColor}-fg}.{/${tc.dimFloorColor}-fg}`;
     }
   }
 
   private updatePartyStatus(): void {
     const state = this.store.getState();
     let content = '';
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const hero = state.party[i];
       if (!hero) continue;
       const starStr = getStars(hero.rarity);
@@ -253,32 +384,32 @@ export class DungeonScreen extends BaseScreen {
 
   /** Check if a popup/modal is active — all dungeon keys should be suppressed */
   private isModalActive(): boolean {
-    return !!(this.lootPopup && this.lootPopup.active);
+    return !!(this.lootPopup && this.lootPopup.active) || this.modalActive;
   }
 
   private setupKeys(): void {
-    this.screen.key(['1'], () => {
+    this.registerKey(['1'], () => {
       if (this.isModalActive()) return;
       this.speed = 1;
       this.store.dispatch({ type: 'SET_GAME_SPEED', speed: 1 });
       this.updateHeader();
       this.screen.render();
     });
-    this.screen.key(['2'], () => {
+    this.registerKey(['2'], () => {
       if (this.isModalActive()) return;
       this.speed = 2;
       this.store.dispatch({ type: 'SET_GAME_SPEED', speed: 2 });
       this.updateHeader();
       this.screen.render();
     });
-    this.screen.key(['3'], () => {
+    this.registerKey(['3'], () => {
       if (this.isModalActive()) return;
       this.speed = 3;
       this.store.dispatch({ type: 'SET_GAME_SPEED', speed: 3 });
       this.updateHeader();
       this.screen.render();
     });
-    this.screen.key(['space'], () => {
+    this.registerKey(['space'], () => {
       if (this.isModalActive()) return;
       if (!this.autoMode) return; // 수동모드에선 일시정지 불필요
       this.paused = !this.paused;
@@ -290,13 +421,13 @@ export class DungeonScreen extends BaseScreen {
         this.stepExploration();
       }
     });
-    this.screen.key(['escape'], () => {
+    this.registerKey(['escape'], () => {
       if (this.isModalActive()) return;
       this.showRetreatConfirm();
     });
 
     // Tab: 수동/자동 모드 전환
-    this.screen.key(['tab'], () => {
+    this.registerKey(['tab'], () => {
       if (this.isModalActive()) return;
       this.autoMode = !this.autoMode;
       this.updateHeader();
@@ -322,33 +453,91 @@ export class DungeonScreen extends BaseScreen {
       }
     });
 
+    // V: FPS/탑뷰 토글
+    this.registerKey(['v'], () => {
+      if (this.isModalActive()) return;
+      this.fpsMode = !this.fpsMode;
+      this.addLog(this.fpsMode ? '{magenta-fg}1인칭 시점{/magenta-fg}' : '{cyan-fg}탑뷰 시점{/cyan-fg}');
+      if (this.fpsMode && this.minimapVisible) this.minimapBox.show();
+      else this.minimapBox.hide();
+      this.updateHint();
+      this.refreshDisplay();
+    });
+
+    // M: 미니맵 토글 (FPS 모드에서만)
+    this.registerKey(['m'], () => {
+      if (this.isModalActive()) return;
+      if (!this.fpsMode) return;
+      this.minimapVisible = !this.minimapVisible;
+      if (this.minimapVisible) {
+        this.minimapBox.show();
+      } else {
+        this.minimapBox.hide();
+      }
+      this.screen.render();
+    });
+
     // Inventory shortcut
-    this.screen.key(['i'], () => {
+    this.registerKey(['i'], () => {
       if (this.isModalActive()) return;
       this.store.dispatch({ type: 'NAVIGATE', screen: 'inventory' });
     });
 
     // Manual movement keys (WASD + arrow keys)
-    this.screen.key(['up', 'w'], () => {
+    this.registerKey(['up', 'w'], () => {
       if (this.isModalActive()) return;
       if (this.autoMode) return;
-      this.manualMove(0, -1);
+      if (this.fpsMode) {
+        const { dx, dy } = this.getFacingDelta();
+        this.manualMove(dx, dy);
+      } else {
+        this.manualMove(0, -1);
+      }
     });
-    this.screen.key(['down', 's'], () => {
+    this.registerKey(['down', 's'], () => {
       if (this.isModalActive()) return;
       if (this.autoMode) return;
-      this.manualMove(0, 1);
+      if (this.fpsMode) {
+        const { dx, dy } = this.getFacingDelta();
+        this.manualMove(-dx, -dy);
+      } else {
+        this.manualMove(0, 1);
+      }
     });
-    this.screen.key(['left', 'a'], () => {
+    this.registerKey(['left', 'a'], () => {
       if (this.isModalActive()) return;
       if (this.autoMode) return;
-      this.manualMove(-1, 0);
+      if (this.fpsMode) {
+        this.rotatePlayer(-Math.PI / 2);
+      } else {
+        this.manualMove(-1, 0);
+      }
     });
-    this.screen.key(['right', 'd'], () => {
+    this.registerKey(['right', 'd'], () => {
       if (this.isModalActive()) return;
       if (this.autoMode) return;
-      this.manualMove(1, 0);
+      if (this.fpsMode) {
+        this.rotatePlayer(Math.PI / 2);
+      } else {
+        this.manualMove(1, 0);
+      }
     });
+  }
+
+  private getFacingDelta(): { dx: number; dy: number } {
+    const angle = this.store.getState().tower?.floorMap.playerAngle ?? 0;
+    const norm = ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const idx = Math.round(norm / (Math.PI / 2)) % 4;
+    return [{ dx: 1, dy: 0 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 0, dy: -1 }][idx]!;
+  }
+
+  private rotatePlayer(delta: number): void {
+    const tower = this.store.getState().tower;
+    if (!tower) return;
+    const fm = { ...tower.floorMap };
+    fm.playerAngle = ((fm.playerAngle + delta) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+    this.store.dispatch({ type: 'UPDATE_FLOOR_MAP', floorMap: fm });
+    this.refreshDisplay();
   }
 
   private manualMove(dx: number, dy: number): void {
@@ -377,7 +566,13 @@ export class DungeonScreen extends BaseScreen {
     newFm.playerX = nx;
     newFm.playerY = ny;
 
-    const radius = getFOVRadius(tower.torchLevel);
+    // FPS 모드에서 이동 시 각도 갱신
+    if (this.fpsMode) {
+      newFm.playerAngle = Math.atan2(dy, dx);
+      if (newFm.playerAngle < 0) newFm.playerAngle += 2 * Math.PI;
+    }
+
+    const radius = getFOVRadius();
     updateFOV(newFm, radius);
 
     this.store.dispatch({ type: 'UPDATE_FLOOR_MAP', floorMap: newFm });
@@ -401,9 +596,19 @@ export class DungeonScreen extends BaseScreen {
   }
 
   private showRetreatConfirm(): void {
+    this.modalActive = true;
+
+    // Stop auto exploration while confirm dialog is active
+    const wasAutoMode = this.autoMode;
+    this.exploring = false;
+    if (this.autoTimer) {
+      clearTimeout(this.autoTimer);
+      this.autoTimer = null;
+    }
+
     const confirmBox = blessed.box({
       top: 'center', left: 'center', width: 40, height: 8,
-      content: '{bold}{red-fg}정말 탈출하시겠습니까?{/red-fg}{/bold}\n\n탈출하면 탑에서 귀환합니다.\n스트레스가 증가합니다.\n\n{gray-fg}Y: 탈출  N: 취소{/gray-fg}',
+      content: '{bold}{red-fg}정말 탈출하시겠습니까?{/red-fg}{/bold}\n\n탈출하면 탑에서 귀환합니다.\n\n{gray-fg}Y: 탈출  N: 취소{/gray-fg}',
       tags: true,
       border: { type: 'line' },
       style: { fg: 'white', bg: 'black', border: { fg: 'red' } },
@@ -412,32 +617,38 @@ export class DungeonScreen extends BaseScreen {
     this.addWidget(confirmBox);
     this.screen.render();
 
+    let handled = false;
     const cleanup = () => {
+      if (handled) return;
+      handled = true;
+      this.modalActive = false;
       confirmBox.destroy();
       const idx = this.widgets.indexOf(confirmBox);
       if (idx !== -1) this.widgets.splice(idx, 1);
+      (this.screen as any).unkey(['y'], yHandler);
+      (this.screen as any).unkey(['n', 'escape'], nHandler);
     };
 
-    (this.screen as any).onceKey(['y'], () => {
+    const yHandler = () => {
+      if (handled) return;
       cleanup();
-      const state = this.store.getState();
-      for (const hero of state.party) {
-        if (hero && hero.stats.hp > 0) {
-          const updated = {
-            ...hero,
-            stats: { ...hero.stats, stress: Math.min(200, hero.stats.stress + 15) },
-          };
-          this.store.dispatch({ type: 'UPDATE_PARTY_HERO', hero: updated });
-        }
-      }
       this.store.dispatch({ type: 'SET_CONTINUOUS_RUN', enabled: false });
       this.store.dispatch({ type: 'EXIT_TOWER' });
-    });
+    };
 
-    (this.screen as any).onceKey(['n', 'escape'], () => {
+    const nHandler = () => {
+      if (handled) return;
       cleanup();
+      // Resume auto exploration if it was active
+      if (wasAutoMode && !this.paused && !this.destroyed) {
+        this.exploring = true;
+        this.stepExploration();
+      }
       this.screen.render();
-    });
+    };
+
+    this.screen.key(['y'], yHandler);
+    this.screen.key(['n', 'escape'], nHandler);
   }
 
   private startExploration(): void {
@@ -457,15 +668,6 @@ export class DungeonScreen extends BaseScreen {
     const state = this.store.getState();
     const tower = state.tower;
     if (!tower) return;
-
-    // Auto use torch if low
-    if (tower.torchLevel < 30) {
-      const hasTorch = state.inventory.some(i => i.torchAmount && i.consumable);
-      if (hasTorch) {
-        this.store.dispatch({ type: 'USE_TORCH' });
-        this.addLog('횃불 사용! (밝기 +25)');
-      }
-    }
 
     this.addLog(`${tower.currentFloor}층 탐험 시작...`);
     this.stepExploration();
@@ -543,10 +745,17 @@ export class DungeonScreen extends BaseScreen {
     if (!tower) return;
 
     const fm = { ...tower.floorMap };
+
+    // FPS 모드: 이동 방향으로 각도 자동 갱신
+    if (this.fpsMode) {
+      fm.playerAngle = Math.atan2(y - fm.playerY, x - fm.playerX);
+      if (fm.playerAngle < 0) fm.playerAngle += 2 * Math.PI;
+    }
+
     fm.playerX = x;
     fm.playerY = y;
 
-    const radius = getFOVRadius(tower.torchLevel);
+    const radius = getFOVRadius();
     updateFOV(fm, radius);
 
     this.store.dispatch({ type: 'UPDATE_FLOOR_MAP', floorMap: fm });
@@ -610,21 +819,15 @@ export class DungeonScreen extends BaseScreen {
         if (tile.monsterTypes && tile.monsterTypes.length > 0) {
           const statMultiplier = getStatMultiplier(floor);
           const monsters = createMonsterGroupScaled(tile.monsterTypes, statMultiplier);
-          const torchLevel = tower.torchLevel;
-
           let isSurprised = false;
           let enemySurprised = false;
 
-          if (torchLevel < 25) {
-            if (percentChance(25)) {
-              isSurprised = true;
-              this.addLog('{red-fg}기습당했다!{/red-fg}');
-            }
-          } else if (torchLevel > 75) {
-            if (percentChance(15)) {
-              enemySurprised = true;
-              this.addLog('{green-fg}적을 기습했다!{/green-fg}');
-            }
+          if (percentChance(15)) {
+            isSurprised = true;
+            this.addLog('{red-fg}기습당했다!{/red-fg}');
+          } else if (percentChance(15)) {
+            enemySurprised = true;
+            this.addLog('{green-fg}적을 기습했다!{/green-fg}');
           }
 
           this.store.dispatch({ type: 'CLEAR_TILE', x, y });
@@ -669,7 +872,6 @@ export class DungeonScreen extends BaseScreen {
       case 'trap': {
         const diff = getDifficulty(floor);
         const damage = tile.trapDamage || (randomInt(3, 8) + diff * 2);
-        const stressDmg = randomInt(5, 15);
         this.addLog(`{red-fg}함정! 파티 전체 ${damage} 피해!{/red-fg}`);
 
         const currentState = this.store.getState();
@@ -680,7 +882,6 @@ export class DungeonScreen extends BaseScreen {
               stats: {
                 ...hero.stats,
                 hp: Math.max(1, hero.stats.hp - damage),
-                stress: Math.min(200, hero.stats.stress + stressDmg),
               },
             };
             this.store.dispatch({ type: 'UPDATE_PARTY_HERO', hero: updated });
@@ -697,14 +898,8 @@ export class DungeonScreen extends BaseScreen {
       }
 
       case 'curio': {
-        this.addLog('{magenta-fg}수상한 물건... 지나침.{/magenta-fg}');
         this.store.dispatch({ type: 'CLEAR_TILE', x, y });
-        this.refreshDisplay();
-        if (this.autoMode) {
-          this.autoTimer = setTimeout(() => {
-            if (!this.destroyed && !this.paused) this.stepExploration();
-          }, Math.floor(800 / this.speed));
-        }
+        this.showCurioEvent();
         break;
       }
 
@@ -774,6 +969,125 @@ export class DungeonScreen extends BaseScreen {
     );
   }
 
+  private showCurioEvent(): void {
+    if (this.destroyed) return;
+    this.exploring = false;
+    this.modalActive = true;
+
+    const event = randomChoice(CURIO_EVENTS);
+    this.addLog(`{magenta-fg}${event.title}{/magenta-fg}`);
+
+    const choiceLabels = event.choices.map(c => c.text);
+    const popup = blessed.box({
+      top: 'center', left: 'center', width: 50, height: choiceLabels.length + 8,
+      label: ` ${event.title} `,
+      content: `{white-fg}${event.description}{/white-fg}`,
+      tags: true,
+      border: { type: 'line' },
+      style: { fg: 'white', bg: 'black', border: { fg: 'magenta' }, label: { fg: 'magenta' } } as any,
+    });
+    this.addWidget(popup);
+
+    const choiceList = blessed.list({
+      top: 3, left: 1, right: 1, bottom: 1,
+      parent: popup,
+      items: choiceLabels,
+      keys: true, vi: false, mouse: true, tags: true,
+      style: {
+        fg: 'white',
+        selected: { fg: 'black', bg: 'magenta', bold: true },
+      },
+    });
+
+    choiceList.focus();
+    this.screen.render();
+
+    choiceList.on('select', (_item: any, idx: number) => {
+      const choice = event.choices[idx];
+      if (!choice) return;
+
+      const outcome = resolveOutcome(choice.outcomes);
+
+      // Apply outcome
+      this.addLog(`{magenta-fg}> ${choice.text}{/magenta-fg}`);
+      this.addLog(`{white-fg}${outcome.description}{/white-fg}`);
+
+      const state = this.store.getState();
+      if (outcome.goldChange) {
+        this.store.dispatch({ type: 'ADD_GOLD', amount: outcome.goldChange });
+        if (outcome.goldChange > 0) {
+          this.addLog(`{yellow-fg}골드 +${outcome.goldChange}{/yellow-fg}`);
+        } else {
+          this.addLog(`{red-fg}골드 ${outcome.goldChange}{/red-fg}`);
+        }
+      }
+
+      if (outcome.hpChange) {
+        const currentState = this.store.getState();
+        for (const hero of currentState.party) {
+          if (hero && hero.stats.hp > 0) {
+            let updated = { ...hero, stats: { ...hero.stats } };
+            if (outcome.hpChange) {
+              updated.stats.hp = clamp(updated.stats.hp + outcome.hpChange, 1, updated.stats.maxHp);
+              if (updated.isDeathsDoor && updated.stats.hp > 0) {
+                updated = { ...updated, isDeathsDoor: false };
+              }
+            }
+            this.store.dispatch({ type: 'UPDATE_PARTY_HERO', hero: updated });
+          }
+        }
+        if (outcome.hpChange) {
+          this.addLog(outcome.hpChange > 0
+            ? `{green-fg}파티 HP +${outcome.hpChange}{/green-fg}`
+            : `{red-fg}파티 HP ${outcome.hpChange}{/red-fg}`);
+        }
+      }
+
+      // Cleanup
+      this.modalActive = false;
+      popup.destroy();
+      const popIdx = this.widgets.indexOf(popup);
+      if (popIdx !== -1) this.widgets.splice(popIdx, 1);
+
+      this.refreshDisplay();
+      if (this.autoMode) {
+        this.autoTimer = setTimeout(() => {
+          if (!this.destroyed && !this.paused) {
+            this.exploring = true;
+            this.stepExploration();
+          }
+        }, Math.floor(800 / this.speed));
+      }
+    });
+  }
+
+  private applyEnvironmentEffect(): void {
+    const state = this.store.getState();
+    const tower = state.tower;
+    if (!tower) return;
+
+    const tc = getThemeConfig(tower.theme || 'catacombs');
+    if (!tc.envEffect || !tc.envValue) return;
+
+    for (const hero of state.party) {
+      if (!hero || hero.stats.hp <= 0) continue;
+      let updated = { ...hero, stats: { ...hero.stats } };
+
+      switch (tc.envEffect) {
+        case 'hp_drain':
+          updated.stats.hp = Math.max(1, updated.stats.hp - tc.envValue);
+          break;
+        // speed_debuff is applied in combat context, not here
+      }
+
+      this.store.dispatch({ type: 'UPDATE_PARTY_HERO', hero: updated });
+    }
+
+    if (tc.envEffect === 'hp_drain') {
+      this.addLog(`{red-fg}${tc.name}의 열기로 파티 HP -${tc.envValue}{/red-fg}`);
+    }
+  }
+
   private advanceToNextFloor(): void {
     if (this.destroyed) return;
 
@@ -800,47 +1114,17 @@ export class DungeonScreen extends BaseScreen {
       return;
     }
 
-    // Auto use torch if low
-    if (tower.torchLevel < 30) {
-      const hasTorch = state.inventory.some(i => i.torchAmount && i.consumable);
-      if (hasTorch) {
-        this.store.dispatch({ type: 'USE_TORCH' });
-        this.addLog('횃불 사용! (밝기 +25)');
-      }
-    }
-
     this.autoTimer = setTimeout(() => {
       if (this.destroyed) return;
 
       this.store.dispatch({ type: 'ADVANCE_FLOOR' });
       this.currentPath = [];
 
-      // Apply torch-based stress
+      // Apply environment effect for the new floor's theme
+      this.applyEnvironmentEffect();
+
       const updatedTower = this.store.getState().tower;
       if (updatedTower) {
-        const torchLevel = updatedTower.torchLevel;
-        let stressGain = 0;
-
-        if (torchLevel <= 0) {
-          stressGain = 10;
-          this.addLog('{red-fg}완전한 어둠!{/red-fg} 스트레스 +10');
-        } else if (torchLevel < 25) {
-          stressGain = 5;
-          this.addLog('{red-fg}어둠이 짙다...{/red-fg} 스트레스 +5');
-        } else if (torchLevel < 50) {
-          stressGain = 2;
-        }
-
-        if (stressGain > 0) {
-          const currentState = this.store.getState();
-          for (const hero of currentState.party) {
-            if (hero && hero.stats.hp > 0) {
-              const result = applyStress(hero, stressGain);
-              this.store.dispatch({ type: 'UPDATE_PARTY_HERO', hero: result.hero });
-            }
-          }
-        }
-
         this.addLog(`${updatedTower.currentFloor}층으로 이동...`);
       }
 
@@ -858,23 +1142,13 @@ export class DungeonScreen extends BaseScreen {
 
     const state = this.store.getState();
 
-    for (const hero of state.party) {
-      if (hero && hero.stats.hp > 0) {
-        const updated = {
-          ...hero,
-          stats: { ...hero.stats, stress: clamp(hero.stats.stress - 10, 0, 200) },
-        };
-        this.store.dispatch({ type: 'UPDATE_PARTY_HERO', hero: updated });
-      }
-    }
-
     const tower = state.tower;
     const floor = tower ? tower.currentFloor : 0;
 
     if (state.gameWon && floor >= 100) {
       this.addLog('{bold}{yellow-fg}어둠의 탑 정복!! 축하합니다!{/yellow-fg}{/bold}');
     } else {
-      this.addLog('{bold}{green-fg}탑 탐험 완료!{/green-fg}{/bold} 스트레스 -10');
+      this.addLog('{bold}{green-fg}탑 탐험 완료!{/green-fg}{/bold}');
     }
 
     this.store.saveGame();
@@ -897,20 +1171,18 @@ export class DungeonScreen extends BaseScreen {
       for (const hero of currentState.party) {
         if (hero && hero.stats.hp > 0) {
           const healAmount = Math.round(hero.stats.maxHp * 0.3);
-          const newStress = clamp(hero.stats.stress - 20, 0, 200);
           const updated = {
             ...hero,
             stats: {
               ...hero.stats,
               hp: clamp(hero.stats.hp + healAmount, 0, hero.stats.maxHp),
-              stress: newStress,
             },
           };
           this.store.dispatch({ type: 'UPDATE_PARTY_HERO', hero: updated });
         }
       }
 
-      this.addLog('{cyan-fg}파티 회복! (+30% HP, -20 스트레스){/cyan-fg}');
+      this.addLog('{cyan-fg}파티 회복! (+30% HP){/cyan-fg}');
       this.addLog('{yellow-fg}연속 탐험: 다시 입장!{/yellow-fg}');
       this.refreshDisplay();
 

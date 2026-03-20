@@ -1,12 +1,12 @@
-import type { Hero, HeroClass, MainCharClass, Item, Screen, CombatState, DungeonEvent, Monster, FloorMap, PendingLoot } from '../models/types.ts';
+import type { Hero, HeroClass, MainCharClass, Item, Screen, CombatState, DungeonEvent, Monster, FloorMap, PendingLoot, PrestigeUpgradeId, GridPosition } from '../models/types.ts';
 
 export type GameAction =
   | { type: 'NAVIGATE'; screen: Screen }
   | { type: 'NEW_GAME'; mainCharClass: MainCharClass }
   | { type: 'RECRUIT_HERO'; heroClass: HeroClass }
   | { type: 'DISMISS_HERO'; heroId: string }
-  | { type: 'ADD_TO_PARTY'; heroId: string; position: number }
-  | { type: 'REMOVE_FROM_PARTY'; position: number }
+  | { type: 'ADD_TO_PARTY'; heroId: string; slotIndex: number }
+  | { type: 'REMOVE_FROM_PARTY'; slotIndex: number }
   | { type: 'SWAP_PARTY_POSITION'; pos1: number; pos2: number }
   | { type: 'BUY_ITEM'; item: Item }
   | { type: 'SELL_ITEM'; itemId: string }
@@ -16,7 +16,7 @@ export type GameAction =
   | { type: 'ENTER_TOWER' }
   | { type: 'ADVANCE_FLOOR' }
   | { type: 'EXIT_TOWER' }
-  | { type: 'USE_TORCH' }
+
   | { type: 'START_COMBAT'; monsters: Monster[]; isSurprised?: boolean; enemySurprised?: boolean }
   | { type: 'SET_COMBAT'; combat: CombatState }
   | { type: 'END_COMBAT_VICTORY'; loot: Item[]; gold: number }
@@ -44,7 +44,9 @@ export type GameAction =
   | { type: 'SET_PENDING_LOOT'; loot: PendingLoot }
   | { type: 'RESOLVE_LOOT_ITEM'; decision: 'equip' | 'store' | 'use' | 'discard'; heroId?: string }
   | { type: 'CLEAR_PENDING_LOOT' }
-  | { type: 'USE_COMBAT_ITEM'; itemId: string; heroId: string };
+  | { type: 'USE_COMBAT_ITEM'; itemId: string; heroId: string }
+  | { type: 'EARN_PRESTIGE'; amount: number }
+  | { type: 'BUY_PRESTIGE_UPGRADE'; upgradeId: PrestigeUpgradeId };
 
 // Import GameState at the type level
 import type { GameState } from '../models/types.ts';

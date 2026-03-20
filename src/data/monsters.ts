@@ -1,6 +1,7 @@
-import type { Monster, MonsterType, MonsterStats } from '../models/types.ts';
+import type { Monster, MonsterType, MonsterStats, GridPosition } from '../models/types.ts';
 import { MONSTER_SKILLS } from './skills.ts';
 import { generateId, randomChoice, randomInt, shuffleArray } from '../utils/helpers.ts';
+import { findEmptyGridCell } from '../utils/grid.ts';
 
 // ============================================================
 // MONSTER TEMPLATES
@@ -10,8 +11,7 @@ interface MonsterTemplate {
   name: string;
   stats: MonsterStats;
   isBoss: boolean;
-  stressDamage: number;
-  preferredPositions: number[];
+  preferredCols: number[];
 }
 
 const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
@@ -25,8 +25,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 5, crit: 3,
     },
     isBoss: false,
-    stressDamage: 5,
-    preferredPositions: [1, 2],
+    preferredCols: [1],
   },
   bone_archer: {
     type: 'bone_archer',
@@ -38,8 +37,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 10, crit: 6,
     },
     isBoss: false,
-    stressDamage: 4,
-    preferredPositions: [3, 4],
+    preferredCols: [3],
   },
   bone_captain: {
     type: 'bone_captain',
@@ -51,8 +49,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 10, crit: 5,
     },
     isBoss: true,
-    stressDamage: 10,
-    preferredPositions: [1, 2],
+    preferredCols: [1],
   },
   cultist_brawler: {
     type: 'cultist_brawler',
@@ -64,8 +61,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 8, crit: 5,
     },
     isBoss: false,
-    stressDamage: 6,
-    preferredPositions: [1, 2],
+    preferredCols: [1],
   },
   cultist_acolyte: {
     type: 'cultist_acolyte',
@@ -77,8 +73,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 12, crit: 2,
     },
     isBoss: false,
-    stressDamage: 4,
-    preferredPositions: [3, 4],
+    preferredCols: [3],
   },
   madman: {
     type: 'madman',
@@ -90,8 +85,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 20, crit: 5,
     },
     isBoss: false,
-    stressDamage: 15,
-    preferredPositions: [2, 3],
+    preferredCols: [2],
   },
   large_carrion_eater: {
     type: 'large_carrion_eater',
@@ -103,8 +97,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 0, crit: 3,
     },
     isBoss: false,
-    stressDamage: 8,
-    preferredPositions: [1, 2],
+    preferredCols: [1],
   },
   necromancer: {
     type: 'necromancer',
@@ -116,8 +109,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 15, crit: 5,
     },
     isBoss: true,
-    stressDamage: 12,
-    preferredPositions: [3, 4],
+    preferredCols: [3],
   },
   shadow_lurker: {
     type: 'shadow_lurker',
@@ -129,8 +121,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 25, crit: 8,
     },
     isBoss: false,
-    stressDamage: 6,
-    preferredPositions: [1, 2, 3],
+    preferredCols: [1, 2],
   },
   plague_rat: {
     type: 'plague_rat',
@@ -142,8 +133,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 12, crit: 3,
     },
     isBoss: false,
-    stressDamage: 3,
-    preferredPositions: [1, 2],
+    preferredCols: [1],
   },
   cursed_knight: {
     type: 'cursed_knight',
@@ -155,8 +145,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 3, crit: 4,
     },
     isBoss: false,
-    stressDamage: 8,
-    preferredPositions: [1, 2],
+    preferredCols: [1],
   },
   dark_mage: {
     type: 'dark_mage',
@@ -168,8 +157,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 10, crit: 4,
     },
     isBoss: false,
-    stressDamage: 10,
-    preferredPositions: [3, 4],
+    preferredCols: [3],
   },
   gargoyle: {
     type: 'gargoyle',
@@ -181,8 +169,7 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 3, crit: 3,
     },
     isBoss: false,
-    stressDamage: 6,
-    preferredPositions: [1, 2],
+    preferredCols: [1],
   },
   wraith: {
     type: 'wraith',
@@ -194,8 +181,43 @@ const MONSTER_TEMPLATES: Record<MonsterType, MonsterTemplate> = {
       dodge: 15, crit: 5,
     },
     isBoss: false,
-    stressDamage: 15,
-    preferredPositions: [2, 3],
+    preferredCols: [2],
+  },
+  frost_titan: {
+    type: 'frost_titan',
+    name: '서리 거인',
+    stats: {
+      maxHp: 55, hp: 55,
+      attack: 10, defense: 5,
+      speed: 2, accuracy: 82,
+      dodge: 3, crit: 4,
+    },
+    isBoss: true,
+    preferredCols: [1],
+  },
+  flame_demon: {
+    type: 'flame_demon',
+    name: '화염 악마',
+    stats: {
+      maxHp: 50, hp: 50,
+      attack: 12, defense: 3,
+      speed: 6, accuracy: 88,
+      dodge: 10, crit: 6,
+    },
+    isBoss: true,
+    preferredCols: [1],
+  },
+  void_lord: {
+    type: 'void_lord',
+    name: '공허의 군주',
+    stats: {
+      maxHp: 70, hp: 70,
+      attack: 11, defense: 4,
+      speed: 5, accuracy: 90,
+      dodge: 8, crit: 5,
+    },
+    isBoss: true,
+    preferredCols: [2],
   },
 };
 
@@ -210,10 +232,10 @@ export function createMonster(type: MonsterType): Monster {
     type: template.type,
     stats: { ...template.stats },
     skills: MONSTER_SKILLS[type].map(s => ({ ...s })),
-    position: 0,
+    position: { row: 2, col: 1 },
+    size: 'small',
     statusEffects: [],
     isBoss: template.isBoss,
-    stressDamage: template.stressDamage,
   };
 }
 
@@ -224,10 +246,10 @@ export function createEncounter(difficulty: number, isBoss: boolean): Monster[] 
   const monsters: Monster[] = [];
 
   if (isBoss) {
-    // Boss encounter: 1 boss + 1-2 minions
     const bossType: MonsterType = difficulty >= 3 ? 'necromancer' : 'bone_captain';
     const boss = createMonster(bossType);
-    boss.position = MONSTER_TEMPLATES[bossType].preferredPositions[0]!;
+    const bossTemplate = MONSTER_TEMPLATES[bossType];
+    boss.position = { row: 2, col: bossTemplate.preferredCols[0]! };
 
     const minionCount = randomInt(1, 2);
     const minions: Monster[] = [];
@@ -239,34 +261,38 @@ export function createEncounter(difficulty: number, isBoss: boolean): Monster[] 
       minions.push(m);
     }
 
-    // Assign positions: boss gets preferred, minions fill remaining
-    if (bossType === 'necromancer') {
-      boss.position = 4;
-      minions.forEach((m, i) => { m.position = i + 1; });
-    } else {
-      boss.position = 1;
-      minions.forEach((m, i) => { m.position = i + 2; });
+    // Assign positions on 3x3 grid
+    const placed: { position: GridPosition }[] = [boss];
+    for (const m of minions) {
+      const mTemplate = MONSTER_TEMPLATES[m.type];
+      const pos = findEmptyGridCell(placed, mTemplate.preferredCols);
+      m.position = pos || { row: 1, col: 1 };
+      placed.push(m);
     }
 
     monsters.push(boss, ...minions);
   } else {
     // Regular encounter: 2-4 monsters
     const count = Math.min(2 + Math.floor(difficulty / 2), 4);
-
-    // Fill front positions, then back
     const frontCount = Math.min(Math.ceil(count / 2), 2);
     const backCount = count - frontCount;
+
+    const placed: { position: GridPosition }[] = [];
 
     for (let i = 0; i < frontCount; i++) {
       const type = randomChoice(REGULAR_FRONT);
       const m = createMonster(type);
-      m.position = i + 1;
+      const pos = findEmptyGridCell(placed, [1]);
+      m.position = pos || { row: i + 1, col: 1 };
+      placed.push(m);
       monsters.push(m);
     }
     for (let i = 0; i < backCount; i++) {
       const type = randomChoice(REGULAR_BACK);
       const m = createMonster(type);
-      m.position = frontCount + i + 1;
+      const pos = findEmptyGridCell(placed, [3]);
+      m.position = pos || { row: i + 1, col: 3 };
+      placed.push(m);
       monsters.push(m);
     }
   }
@@ -288,4 +314,8 @@ export function createEncounter(difficulty: number, isBoss: boolean): Monster[] 
 
 export function getMonsterName(type: MonsterType): string {
   return MONSTER_TEMPLATES[type].name;
+}
+
+export function getMonsterPreferredCols(type: MonsterType): number[] {
+  return MONSTER_TEMPLATES[type].preferredCols;
 }
