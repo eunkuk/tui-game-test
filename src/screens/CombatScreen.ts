@@ -1,9 +1,9 @@
 import blessed from 'blessed';
 import { BaseScreen } from './BaseScreen.ts';
 import type { Hero, Monster, CombatState, Item } from '../models/types.ts';
-import { getClassName, getStars } from '../data/heroes.ts';
+import { getClassName } from '../data/heroes.ts';
 import { formatBar, randomInt, clamp } from '../utils/helpers.ts';
-import { applyStress, processAfflictionBehavior } from '../engine/stress-engine.ts';
+
 import {
   generateTurnOrder,
   executeHeroSkill,
@@ -18,8 +18,7 @@ import { generateCombatLoot, generateBossLoot } from '../engine/loot-generator.t
 import { getHeroAutoAction } from '../engine/hero-ai.ts';
 
 export class CombatScreen extends BaseScreen {
-  private enemyBox!: blessed.Widgets.BoxElement;
-  private allyBox!: blessed.Widgets.BoxElement;
+  private gridBox!: blessed.Widgets.BoxElement;
   private logBox!: blessed.Widgets.BoxElement;
   private headerBox!: blessed.Widgets.BoxElement;
   private turnOrderBox!: blessed.Widgets.BoxElement;
@@ -68,9 +67,10 @@ export class CombatScreen extends BaseScreen {
       style: { bg: 'black' },
     });
 
+    // === Left column (33%) ===
     // Header
     this.headerBox = this.createBox({
-      top: 0, left: 0, width: '100%', height: 3,
+      top: 0, left: 0, width: '33%', height: 3,
       tags: true,
       border: { type: 'line' },
       style: { fg: 'white', bg: 'black', border: { fg: 'red' } },
@@ -78,44 +78,17 @@ export class CombatScreen extends BaseScreen {
 
     // Turn order queue
     this.turnOrderBox = this.createBox({
-      top: 3, left: 0, width: '100%', height: 3,
+      top: 3, left: 0, width: '33%', height: 3,
       tags: true,
       border: { type: 'line' },
-      label: ' \ud589\ub3d9 \uc21c\uc11c ',
+      label: ' 순서 ',
       style: { fg: 'white', bg: 'black', border: { fg: 'gray' }, label: { fg: 'gray' } } as any,
     });
 
-    // Enemy panel
-    this.enemyBox = this.createBox({
-      top: 6, left: 0, width: '100%', height: 7,
-      label: ' \uc801 ',
-      tags: true,
-      border: { type: 'line' },
-      style: { fg: 'white', bg: 'black', border: { fg: 'red' }, label: { fg: 'red' } } as any,
-    });
-
-    // VS separator
-    this.createBox({
-      top: 13, left: 0, width: '100%', height: 1,
-      tags: true,
-      content: '{center}{bold}{yellow-fg}\u2694 VS \u2694{/yellow-fg}{/bold}{/center}',
-      style: { fg: 'yellow', bg: 'black' },
-      align: 'center',
-    });
-
-    // Ally panel
-    this.allyBox = this.createBox({
-      top: 14, left: 0, width: '100%', height: 8,
-      label: ' \uc544\uad70 ',
-      tags: true,
-      border: { type: 'line' },
-      style: { fg: 'white', bg: 'black', border: { fg: 'blue' }, label: { fg: 'cyan' } } as any,
-    });
-
-    // Combat log
+    // Combat log (fills remaining left column height)
     this.logBox = this.createBox({
-      top: 22, left: 0, width: '100%', height: 6,
-      label: ' \uc804\ud22c \uae30\ub85d ',
+      top: 6, left: 0, width: '33%', bottom: 1,
+      label: ' 전투 기록 ',
       tags: true,
       border: { type: 'line' },
       scrollable: true,
@@ -123,11 +96,22 @@ export class CombatScreen extends BaseScreen {
       style: { fg: 'gray', bg: 'black', border: { fg: 'gray' }, label: { fg: 'gray' } } as any,
     });
 
+    // === Right column (67%) ===
+    // Grid visualization area
+    this.gridBox = this.createBox({
+      top: 0, left: '33%', width: '67%', bottom: 1,
+      label: ' 전장 ',
+      tags: true,
+      border: { type: 'line' },
+      style: { fg: 'white', bg: 'black', border: { fg: 'yellow' }, label: { fg: 'yellow' } } as any,
+    });
+
+    // === Bottom (100%) ===
     // Hint
     this.hintBox = this.createBox({
       bottom: 0, left: 0, width: '100%', height: 1,
       tags: true,
-      content: '{gray-fg}1/2/3: \uc18d\ub3c4  Space: \uc77c\uc2dc\uc815\uc9c0  P: \ubb3c\uc57d  Esc: \ud3ec\uae30{/gray-fg}',
+      content: '{gray-fg}1/2/3:속도  Space:일시정지  P:물약  Esc:포기{/gray-fg}',
       style: { fg: 'gray', bg: 'black' },
     });
 
@@ -140,31 +124,19 @@ export class CombatScreen extends BaseScreen {
     if (this.destroyed) return;
     this.updateHeader();
     this.updateTurnOrder();
-    this.updateEnemies();
-    this.updateAllies();
+    this.updateGrid();
     this.updateLog();
     this.screen.render();
   }
 
   private updateHeader(): void {
-    const turn = this.combat.turnOrder[this.combat.currentTurnIndex];
-    let turnName = '???';
-    if (turn) {
-      if (turn.isHero) {
-        const hero = this.combat.heroes.find(h => h.id === turn.id);
-        turnName = hero ? hero.name : '???';
-      } else {
-        const monster = this.combat.monsters.find(m => m.id === turn.id);
-        turnName = monster ? monster.name : '???';
-      }
-    }
-    const speedBtns = [1, 2, 3].map(s => s === this.speed ? `{yellow-fg}[${s}x]{/yellow-fg}` : `{gray-fg}[${s}x]{/gray-fg}`).join(' ');
     const towerState = this.store.getState().tower;
     const floorNum = towerState ? towerState.currentFloor : 0;
     const isBossFloor = floorNum > 0 && floorNum % 10 === 0;
-    const floorLabel = floorNum > 0 ? (isBossFloor ? `{bold}{red-fg}\u2605 BOSS \u2605{/red-fg}{/bold} ${floorNum}\uCE35` : `${floorNum}\uCE35`) : '';
-    const pauseLabel = this.paused ? '  {bold}{red-fg}[일시정지]{/red-fg}{/bold}' : '';
-    this.headerBox.setContent(` {bold}{red-fg}\uC5B4\uB460\uC758 \uD0D1{/red-fg}{/bold} ${floorLabel}  |  {bold}{red-fg}\uB77C\uC6B4\uB4DC ${this.combat.round}{/red-fg}{/bold}  |  ${speedBtns}  |  {yellow-fg}${turnName}\uC758 \uCC28\uB840{/yellow-fg}${pauseLabel}`);
+    const floorLabel = isBossFloor ? `{red-fg}B${floorNum}{/red-fg}` : `${floorNum}F`;
+    const speedBtns = [1, 2, 3].map(s => s === this.speed ? `{yellow-fg}[${s}]{/yellow-fg}` : `{gray-fg}[${s}]{/gray-fg}`).join('');
+    const pauseLabel = this.paused ? ' {red-fg}⏸{/red-fg}' : '';
+    this.headerBox.setContent(` R${this.combat.round} ${floorLabel} ${speedBtns}${pauseLabel}`);
   }
 
   private updateTurnOrder(): void {
@@ -201,48 +173,182 @@ export class CombatScreen extends BaseScreen {
     this.turnOrderBox.setContent(content);
   }
 
-  private updateEnemies(): void {
-    let content = '';
-    for (const monster of this.combat.monsters) {
-      if (monster.stats.hp <= 0) continue;
-      const hpPct = monster.stats.hp / monster.stats.maxHp;
-      const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
-      const hpBar = formatBar(monster.stats.hp, monster.stats.maxHp, 12);
-      const effects = this.formatEffects(monster.statusEffects);
-      const boss = monster.isBoss ? '{red-fg}[BOSS]{/red-fg} ' : '';
-      content += ` [${monster.position}] ${boss}{bold}${monster.name}{/bold}   HP {${hpColor}-fg}${hpBar}{/${hpColor}-fg} ${monster.stats.hp}/${monster.stats.maxHp}  ${effects}\n`;
+  /** Truncate a name to fit in a grid cell (max ~6 display chars) */
+  private truncName(name: string, maxWidth: number = 6): string {
+    let width = 0;
+    let result = '';
+    for (const ch of name) {
+      const w = ch.charCodeAt(0) > 0x7f ? 2 : 1;
+      if (width + w > maxWidth) break;
+      width += w;
+      result += ch;
     }
-    if (!content) content = '{gray-fg}  (\uc801 \uc5c6\uc74c){/gray-fg}';
-    this.enemyBox.setContent(content);
+    return result;
   }
 
-  private updateAllies(): void {
-    let content = '';
-    for (const hero of this.combat.heroes) {
-      const isDead = hero.stats.hp <= 0 && !hero.isDeathsDoor;
-      if (isDead) {
-        content += ` [${hero.position}] {red-fg}{bold}${hero.name} (${getClassName(hero.class)}) - \uc0ac\ub9dd{/bold}{/red-fg}\n`;
-        continue;
-      }
-      const stars = getStars(hero.rarity);
-      const hpPct = hero.stats.hp / hero.stats.maxHp;
-      const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
-      const hpBar = formatBar(hero.stats.hp, hero.stats.maxHp, 10);
-      const stressColor = hero.stats.stress >= 100 ? 'red' : hero.stats.stress >= 50 ? 'yellow' : 'gray';
-      const stressBar = formatBar(hero.stats.stress, 200, 6);
-      const effects = this.formatEffects(hero.statusEffects);
-      const deathsDoor = hero.isDeathsDoor ? '{red-fg}[\uc8fd\ubb38]{/red-fg} ' : '';
-      const affliction = hero.affliction ? `{red-fg}[${hero.affliction}]{/red-fg} ` : '';
-      const virtue = hero.virtue ? `{green-fg}[${hero.virtue}]{/green-fg} ` : '';
+  /** Build a 3x3 grid string for one side (enemy or ally) */
+  private buildGridSide(
+    units: Array<{ name: string; hp: number; maxHp: number; pos: { row: number; col: number }; isCurrent: boolean; isDead: boolean; isBoss?: boolean; effects: string }>,
+    isEnemy: boolean,
+  ): string[] {
+    // Grid: 3 cols x 3 rows. For enemies, col order is 후(3) 중(2) 전(1). For allies, col order is 전(1) 중(2) 후(3).
+    const colOrder = isEnemy ? [3, 2, 1] : [1, 2, 3];
+    const colLabels = isEnemy ? ['후', '중', '전'] : ['전', '중', '후'];
+    const CELL_W = 10;
 
-      const currentTurn = this.combat.turnOrder[this.combat.currentTurnIndex];
-      const isCurrentTurn = currentTurn && currentTurn.isHero && currentTurn.id === hero.id;
-      const prefix = isCurrentTurn ? '{bold}{yellow-fg}>{/yellow-fg}{/bold}' : ' ';
+    // Build cell content: 3 lines per row
+    const lines: string[] = [];
 
-      const mcTag = hero.isMainCharacter ? '{bold}{yellow-fg}[MC]{/yellow-fg}{/bold} ' : '';
-      content += `${prefix}[${hero.position}] ${mcTag}{yellow-fg}${stars}{/yellow-fg} {bold}${hero.name}{/bold} (${getClassName(hero.class)})  HP {${hpColor}-fg}${hpBar}{/${hpColor}-fg} ${hero.stats.hp}/${hero.stats.maxHp}  ST {${stressColor}-fg}${stressBar}{/${stressColor}-fg} ${hero.stats.stress} ${deathsDoor}${affliction}${virtue}${effects}\n`;
+    // Column headers
+    let headerLine = ' ';
+    for (let ci = 0; ci < 3; ci++) {
+      const label = colLabels[ci]!;
+      headerLine += `   ${label}     `;
     }
-    this.allyBox.setContent(content);
+    lines.push(headerLine);
+
+    // Top border
+    let topBorder = ' ';
+    for (let ci = 0; ci < 3; ci++) {
+      topBorder += '\u250c' + '\u2500'.repeat(CELL_W) + '\u2510';
+    }
+    lines.push(topBorder);
+
+    for (let row = 1; row <= 3; row++) {
+      let nameLine = ' ';
+      let hpLine = ' ';
+      let bottomBorder = ' ';
+      const isLastRow = row === 3;
+
+      for (let ci = 0; ci < 3; ci++) {
+        const col = colOrder[ci]!;
+        const unit = units.find(u => u.pos.row === row && u.pos.col === col && !u.isDead);
+
+        if (unit) {
+          const borderColor = unit.isCurrent ? 'yellow' : isEnemy ? 'red' : 'cyan';
+          const nameColor = unit.isBoss ? 'red' : isEnemy ? 'red' : 'cyan';
+          const truncated = this.truncName(unit.name, CELL_W);
+          // Compute display width of truncated name
+          let nameDisplayWidth = 0;
+          for (const ch of truncated) {
+            nameDisplayWidth += ch.charCodeAt(0) > 0x7f ? 2 : 1;
+          }
+          const namePad = Math.max(0, CELL_W - nameDisplayWidth);
+          nameLine += `{${borderColor}-fg}\u2502{/${borderColor}-fg}{${nameColor}-fg}${truncated}{/${nameColor}-fg}${' '.repeat(namePad)}{${borderColor}-fg}\u2502{/${borderColor}-fg}`;
+
+          // HP bar
+          const hpPct = unit.maxHp > 0 ? unit.hp / unit.maxHp : 0;
+          const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
+          const barLen = CELL_W;
+          const filled = Math.round(hpPct * barLen);
+          const hpBar = `{${hpColor}-fg}${'█'.repeat(filled)}{/${hpColor}-fg}{gray-fg}${'░'.repeat(barLen - filled)}{/gray-fg}`;
+          hpLine += `{${borderColor}-fg}\u2502{/${borderColor}-fg}${hpBar}{${borderColor}-fg}\u2502{/${borderColor}-fg}`;
+        } else {
+          // Empty cell
+          nameLine += '{gray-fg}\u2502{/gray-fg}' + ' '.repeat(CELL_W) + '{gray-fg}\u2502{/gray-fg}';
+          hpLine += '{gray-fg}\u2502{/gray-fg}' + '{gray-fg}' + '\u2500'.repeat(CELL_W) + '{/gray-fg}' + '{gray-fg}\u2502{/gray-fg}';
+        }
+      }
+
+      // Bottom border for this row
+      for (let ci = 0; ci < 3; ci++) {
+        const col = colOrder[ci]!;
+        const unit = units.find(u => u.pos.row === row && u.pos.col === col && !u.isDead);
+        const borderColor = unit?.isCurrent ? 'yellow' : 'gray';
+        if (isLastRow) {
+          bottomBorder += `{${borderColor}-fg}\u2514${'─'.repeat(CELL_W)}\u2518{/${borderColor}-fg}`;
+        } else {
+          bottomBorder += `{${borderColor}-fg}\u251c${'─'.repeat(CELL_W)}\u2524{/${borderColor}-fg}`;
+        }
+      }
+
+      lines.push(nameLine);
+      lines.push(hpLine);
+      lines.push(bottomBorder);
+    }
+
+    return lines;
+  }
+
+  private updateGrid(): void {
+    const currentTurn = this.combat.turnOrder[this.combat.currentTurnIndex];
+
+    // Build enemy units
+    const enemyUnits = this.combat.monsters.map(m => ({
+      name: m.isBoss ? '\u2605' + m.name : m.name,
+      hp: m.stats.hp,
+      maxHp: m.stats.maxHp,
+      pos: m.position,
+      isCurrent: !!(currentTurn && !currentTurn.isHero && currentTurn.id === m.id),
+      isDead: m.stats.hp <= 0,
+      isBoss: m.isBoss,
+      effects: this.formatEffects(m.statusEffects),
+    }));
+
+    // Build ally units
+    const allyUnits = this.combat.heroes.map(h => ({
+      name: h.isMainCharacter ? '\u2605' + h.name : h.name,
+      hp: h.stats.hp,
+      maxHp: h.stats.maxHp,
+      pos: h.position,
+      isCurrent: !!(currentTurn && currentTurn.isHero && currentTurn.id === h.id),
+      isDead: h.stats.hp <= 0 && !h.isDeathsDoor,
+      isBoss: false,
+      effects: this.formatEffects(h.statusEffects),
+    }));
+
+    const enemyGrid = this.buildGridSide(enemyUnits, true);
+    const allyGrid = this.buildGridSide(allyUnits, false);
+
+    // Current turn indicator
+    let turnLabel = '';
+    if (currentTurn) {
+      if (currentTurn.isHero) {
+        const hero = this.combat.heroes.find(h => h.id === currentTurn.id);
+        turnLabel = hero ? `{yellow-fg}> ${hero.name}의 차례{/yellow-fg}` : '';
+      } else {
+        const monster = this.combat.monsters.find(m => m.id === currentTurn.id);
+        turnLabel = monster ? `{red-fg}> ${monster.name}의 차례{/red-fg}` : '';
+      }
+    }
+
+    // Compose full grid content
+    let content = '';
+    content += ` {bold}{red-fg}[ 적 진영 ]{/red-fg}{/bold}              {bold}{cyan-fg}[ 아군 진영 ]{/cyan-fg}{/bold}\n`;
+
+    // Merge enemy and ally lines side by side
+    const maxLines = Math.max(enemyGrid.length, allyGrid.length);
+    for (let i = 0; i < maxLines; i++) {
+      const eLine = i < enemyGrid.length ? enemyGrid[i]! : '';
+      const aLine = i < allyGrid.length ? allyGrid[i]! : '';
+      content += `${eLine}  ${aLine}\n`;
+    }
+
+    // Unit details below the grid
+    content += '\n';
+    content += turnLabel + '\n';
+
+    // Show status effects summary for alive units
+    const aliveEnemies = this.combat.monsters.filter(m => m.stats.hp > 0);
+    const aliveHeroes = this.combat.heroes.filter(h => h.stats.hp > 0 || h.isDeathsDoor);
+
+    for (const m of aliveEnemies) {
+      const effects = this.formatEffects(m.statusEffects);
+      const hpPct = m.stats.hp / m.stats.maxHp;
+      const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
+      const boss = m.isBoss ? '{red-fg}[B]{/red-fg}' : '';
+      content += ` ${boss}{red-fg}${m.name}{/red-fg} {${hpColor}-fg}${m.stats.hp}/${m.stats.maxHp}{/${hpColor}-fg} ${effects}\n`;
+    }
+    for (const h of aliveHeroes) {
+      const effects = this.formatEffects(h.statusEffects);
+      const hpPct = h.stats.hp / h.stats.maxHp;
+      const hpColor = hpPct > 0.5 ? 'green' : hpPct > 0.25 ? 'yellow' : 'red';
+      const deathsDoor = h.isDeathsDoor ? '{red-fg}[죽문]{/red-fg}' : '';
+      const mc = h.isMainCharacter ? '{yellow-fg}[MC]{/yellow-fg}' : '';
+      content += ` ${mc}{cyan-fg}${h.name}{/cyan-fg} {${hpColor}-fg}${h.stats.hp}/${h.stats.maxHp}{/${hpColor}-fg} ${deathsDoor}${effects}\n`;
+    }
+
+    this.gridBox.setContent(content);
   }
 
   private formatEffects(effects: { type: string; duration: number }[]): string {
@@ -270,7 +376,7 @@ export class CombatScreen extends BaseScreen {
   }
 
   private setupKeys(): void {
-    this.screen.key(['1'], () => {
+    this.registerKey(['1'], () => {
       if (this.currentPhase === 'victory' || this.currentPhase === 'defeat') return;
       this.speed = 1;
       this.store.dispatch({ type: 'SET_GAME_SPEED', speed: 1 });
@@ -278,7 +384,7 @@ export class CombatScreen extends BaseScreen {
       this.screen.render();
     });
 
-    this.screen.key(['2'], () => {
+    this.registerKey(['2'], () => {
       if (this.currentPhase === 'victory' || this.currentPhase === 'defeat') return;
       this.speed = 2;
       this.store.dispatch({ type: 'SET_GAME_SPEED', speed: 2 });
@@ -286,7 +392,7 @@ export class CombatScreen extends BaseScreen {
       this.screen.render();
     });
 
-    this.screen.key(['3'], () => {
+    this.registerKey(['3'], () => {
       if (this.currentPhase === 'victory' || this.currentPhase === 'defeat') return;
       this.speed = 3;
       this.store.dispatch({ type: 'SET_GAME_SPEED', speed: 3 });
@@ -294,7 +400,7 @@ export class CombatScreen extends BaseScreen {
       this.screen.render();
     });
 
-    this.screen.key(['space'], () => {
+    this.registerKey(['space'], () => {
       if (this.currentPhase === 'victory' || this.currentPhase === 'defeat') return;
       this.paused = !this.paused;
       this.store.dispatch({ type: 'TOGGLE_PAUSE' });
@@ -305,12 +411,12 @@ export class CombatScreen extends BaseScreen {
       }
     });
 
-    this.screen.key(['escape'], () => {
+    this.registerKey(['escape'], () => {
       if (this.currentPhase === 'victory' || this.currentPhase === 'defeat') return;
       this.showAbandonConfirm();
     });
 
-    this.screen.key(['p'], () => {
+    this.registerKey(['p'], () => {
       if (this.currentPhase === 'victory' || this.currentPhase === 'defeat') return;
       if (!this.paused) {
         this.paused = true;
@@ -323,9 +429,11 @@ export class CombatScreen extends BaseScreen {
   }
 
   private showAbandonConfirm(): void {
+    this.paused = true;
+
     const confirmBox = blessed.box({
       top: 'center', left: 'center', width: 40, height: 8,
-      content: '{bold}{red-fg}\uc815\ub9d0 \ud3ec\uae30\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?{/red-fg}{/bold}\n\n\ud3ec\uae30\ud558\uba74 \ub358\uc804\uc744 \ud0c8\ucd9c\ud569\ub2c8\ub2e4.\n\uc2a4\ud2b8\ub808\uc2a4\uac00 \uc99d\uac00\ud569\ub2c8\ub2e4.\n\n{gray-fg}Y: \ud3ec\uae30  N: \ucde8\uc18c{/gray-fg}',
+      content: '{bold}{red-fg}정말 포기하시겠습니까?{/red-fg}{/bold}\n\n포기하면 던전을 탈출합니다.\n\n{gray-fg}Y: 포기  N: 취소{/gray-fg}',
       tags: true,
       border: { type: 'line' },
       style: { fg: 'white', bg: 'black', border: { fg: 'red' } },
@@ -334,33 +442,36 @@ export class CombatScreen extends BaseScreen {
     this.addWidget(confirmBox);
     this.screen.render();
 
+    let handled = false;
     const cleanup = () => {
+      if (handled) return;
+      handled = true;
       confirmBox.destroy();
       const idx = this.widgets.indexOf(confirmBox);
       if (idx !== -1) this.widgets.splice(idx, 1);
+      (this.screen as any).unkey(['y'], yHandler);
+      (this.screen as any).unkey(['n', 'escape'], nHandler);
     };
 
-    (this.screen as any).onceKey(['y'], () => {
+    const yHandler = () => {
+      if (handled) return;
       cleanup();
-      // Apply stress and go back to town
-      const state = this.store.getState();
-      for (const hero of state.party) {
-        if (hero && hero.stats.hp > 0) {
-          const updated = {
-            ...hero,
-            stats: { ...hero.stats, stress: Math.min(200, hero.stats.stress + 15) },
-          };
-          this.store.dispatch({ type: 'UPDATE_PARTY_HERO', hero: updated });
-        }
-      }
       this.store.dispatch({ type: 'SET_CONTINUOUS_RUN', enabled: false });
       this.store.dispatch({ type: 'NAVIGATE', screen: 'town' });
-    });
+    };
 
-    (this.screen as any).onceKey(['n', 'escape'], () => {
+    const nHandler = () => {
+      if (handled) return;
       cleanup();
+      this.paused = false;
+      this.store.dispatch({ type: 'TOGGLE_PAUSE' }); // unpause
+      this.updateHeader();
       this.screen.render();
-    });
+      this.advanceTurn();
+    };
+
+    this.screen.key(['y'], yHandler);
+    this.screen.key(['n', 'escape'], nHandler);
   }
 
   private executeAutoHeroTurn(): void {
@@ -440,18 +551,6 @@ export class CombatScreen extends BaseScreen {
     const result = executeHeroSkill(this.combat, turn.id, skillIndex, targetId);
     this.combat = result.combat;
 
-    // Check for kills - hero that dealt killing blow loses 5 stress
-    const heroIdx = this.combat.heroes.findIndex(h => h.id === turn.id);
-    if (heroIdx !== -1) {
-      for (const m of this.combat.monsters) {
-        if (monsterHpBefore[m.id]! > 0 && m.stats.hp <= 0) {
-          const stressResult = applyStress(this.combat.heroes[heroIdx]!, -5);
-          this.combat.heroes[heroIdx] = stressResult.hero;
-          this.combat.log.push(`${this.combat.heroes[heroIdx]!.name}\uc774(\uac00) \uc548\ub3c4\ud569\ub2c8\ub2e4. (\uc2a4\ud2b8\ub808\uc2a4 -5)`);
-        }
-      }
-    }
-
     this.store.dispatch({ type: 'SET_COMBAT', combat: this.combat });
     this.updateDisplay();
 
@@ -493,7 +592,6 @@ export class CombatScreen extends BaseScreen {
           }
 
           if (updatedHero.stats.hp <= 0) {
-            this.applyAllyDeathStress(updatedHero.id);
             this.combat.currentTurnIndex++;
             continue;
           }
@@ -516,30 +614,6 @@ export class CombatScreen extends BaseScreen {
               ...this.combat.heroes[heroIdx]!,
               statusEffects: tickStatusEffects(this.combat.heroes[heroIdx]!.statusEffects),
             };
-          }
-
-          // Check affliction behavior
-          if (this.combat.heroes[heroIdx]!.affliction) {
-            const behavior = processAfflictionBehavior(this.combat.heroes[heroIdx]!);
-            if (behavior) {
-              this.combat.log.push(...behavior.log);
-              if (behavior.action === 'skip') {
-                this.combat.currentTurnIndex++;
-                this.updateDisplay();
-                continue;
-              }
-              if (behavior.action === 'stress_party') {
-                for (let i = 0; i < this.combat.heroes.length; i++) {
-                  if (this.combat.heroes[i]!.id !== hero.id && this.combat.heroes[i]!.stats.hp > 0) {
-                    const stressResult = applyStress(this.combat.heroes[i]!, 5);
-                    this.combat.heroes[i] = stressResult.hero;
-                  }
-                }
-                this.combat.currentTurnIndex++;
-                this.updateDisplay();
-                continue;
-              }
-            }
           }
 
           // Hero's turn - always auto
@@ -597,13 +671,6 @@ export class CombatScreen extends BaseScreen {
     const result = executeEnemyTurn(this.combat, monsterId);
     this.combat = result.combat;
 
-    // Check for hero deaths
-    for (const h of this.combat.heroes) {
-      if (heroHpBefore[h.id]! > 0 && h.stats.hp <= 0 && !h.isDeathsDoor) {
-        this.applyAllyDeathStress(h.id);
-      }
-    }
-
     this.store.dispatch({ type: 'SET_COMBAT', combat: this.combat });
     this.updateDisplay();
 
@@ -626,18 +693,6 @@ export class CombatScreen extends BaseScreen {
     }, Math.floor(400 / this.speed));
   }
 
-  private applyAllyDeathStress(deadHeroId: string): void {
-    this.combat.log.push('{red-fg}\ub3d9\ub8cc\uc758 \uc8fd\uc74c\uc5d0 \ud30c\ud2f0\uac00 \ub3d9\uc694\ud569\ub2c8\ub2e4! (\uc2a4\ud2b8\ub808\uc2a4 +15){/red-fg}');
-    for (let i = 0; i < this.combat.heroes.length; i++) {
-      const h = this.combat.heroes[i]!;
-      if (h.id !== deadHeroId && h.stats.hp > 0) {
-        const stressResult = applyStress(h, 15);
-        this.combat.heroes[i] = stressResult.hero;
-        this.combat.log.push(...stressResult.log);
-      }
-    }
-  }
-
   private newRound(): void {
     if (this.destroyed) return;
     this.combat.round++;
@@ -654,12 +709,10 @@ export class CombatScreen extends BaseScreen {
     const state = this.store.getState();
     const tower = state.tower;
     const floor = tower ? tower.currentFloor : 1;
-    const torchLevel = tower ? tower.torchLevel : 100;
-
     const hasBoss = this.combat.monsters.some(m => m.isBoss && m.stats.hp <= 0);
     const loot = hasBoss
       ? generateBossLoot(floor)
-      : generateCombatLoot(floor, torchLevel);
+      : generateCombatLoot(floor);
 
     // Calculate EXP for display
     const monsterCount = this.combat.monsters.length;
@@ -722,7 +775,6 @@ export class CombatScreen extends BaseScreen {
     const potionLabels = potions.map(p => {
       const effects: string[] = [];
       if (p.healAmount) effects.push(`HP+${p.healAmount}`);
-      if (p.stressHealAmount) effects.push(`ST-${p.stressHealAmount}`);
       if (p.buffEffect) effects.push(`${p.buffEffect.stat}+${p.buffEffect.value}`);
       return `${p.name} (${effects.join(' ')})`;
     });
@@ -765,7 +817,7 @@ export class CombatScreen extends BaseScreen {
     if (aliveHeroes.length === 0) return;
 
     const heroLabels = aliveHeroes.map(h =>
-      `${h.name} (${getClassName(h.class)}) HP ${h.stats.hp}/${h.stats.maxHp} ST ${h.stats.stress}`
+      `${h.name} (${getClassName(h.class)}) HP ${h.stats.hp}/${h.stats.maxHp}`
     );
 
     const heroList = blessed.list({
