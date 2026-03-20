@@ -37,7 +37,7 @@ function getWallPalette(tc: ThemeConfig): WallPalette {
   const nearB = parseInt(hex.slice(5, 7), 16);
   return {
     nearR, nearG, nearB,
-    farR: 0x1a, farG: 0x18, farB: 0x18,
+    farR: 0x30, farG: 0x28, farB: 0x28,
   };
 }
 
@@ -50,9 +50,9 @@ function getWallColor(dist: number, side: 0 | 1, pal: WallPalette): string {
   let g = lerp(pal.nearG, pal.farG, t);
   let b = lerp(pal.nearB, pal.farB, t);
   if (side === 1) {
-    r *= 0.62;
-    g *= 0.62;
-    b *= 0.62;
+    r *= 0.75;
+    g *= 0.75;
+    b *= 0.75;
   }
   return rgb(r, g, b);
 }
@@ -94,14 +94,14 @@ export function renderFPS(
   }
 
   // 천장 그래디언트 색상 (꼭대기 → 벽 경계)
-  // top: #0a0a1e, bottom: #3a4a7a
-  const ceilTopR = 0x0a, ceilTopG = 0x0a, ceilTopB = 0x1e;
-  const ceilBotR = 0x3a, ceilBotG = 0x4a, ceilBotB = 0x7a;
+  // top: #1a1a3e → bottom: #5a6a9a (더 밝게)
+  const ceilTopR = 0x1a, ceilTopG = 0x1a, ceilTopB = 0x3e;
+  const ceilBotR = 0x5a, ceilBotG = 0x6a, ceilBotB = 0x9a;
 
   // 바닥 그래디언트 색상 (벽 경계 → 맨 아래)
-  // top: #4a4030, bottom: #aa9a70
-  const floorTopR = 0x4a, floorTopG = 0x40, floorTopB = 0x30;
-  const floorBotR = 0xaa, floorBotG = 0x9a, floorBotB = 0x70;
+  // top: #6a5a40 → bottom: #cc bb88 (훨씬 밝게)
+  const floorTopR = 0x6a, floorTopG = 0x5a, floorTopB = 0x40;
+  const floorBotR = 0xcc, floorBotG = 0xbb, floorBotB = 0x88;
 
   for (let row = 0; row < viewHeight; row++) {
     let line = '';
@@ -129,9 +129,9 @@ export function renderFPS(
         let fB = lerp(floorTopB, floorBotB, t);
         // 체크보드: (col + row) % 2 에 따라 밝기 변화
         if ((col + row) % 2 === 0) {
-          fR *= 1.10; fG *= 1.10; fB *= 1.10;
+          fR *= 1.15; fG *= 1.15; fB *= 1.15;
         } else {
-          fR *= 0.95; fG *= 0.95; fB *= 0.95;
+          fR *= 0.85; fG *= 0.85; fB *= 0.85;
         }
         const c = rgb(fR, fG, fB);
         line += `{${c}-fg}\u2588{/${c}-fg}`;

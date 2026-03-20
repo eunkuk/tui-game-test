@@ -30,7 +30,7 @@ export class DungeonScreen extends BaseScreen {
   private currentPath: [number, number][] = [];
   private paused = false;
   private lootPopup: { destroy: () => void; active: boolean } | null = null;
-  private autoMode = true; // true=자동, false=수동
+  private autoMode = false; // true=자동, false=수동
   private modalActive = false;
   private fpsMode = false;
   private minimapVisible = true;
@@ -72,9 +72,11 @@ export class DungeonScreen extends BaseScreen {
     });
     this.updateHeader();
 
-    // Map viewer
+    // Map viewer — 탑뷰에서는 더 크게
+    const mapHeight = this.fpsMode ? 16 : 22;
+    const bottomTop = 3 + mapHeight;
     this.mapBox = this.createBox({
-      top: 3, left: 0, width: '100%', height: 16,
+      top: 3, left: 0, width: '100%', height: mapHeight,
       tags: true,
       border: { type: 'line' },
       label: ' 지도 ',
@@ -94,7 +96,7 @@ export class DungeonScreen extends BaseScreen {
 
     // Party status
     this.partyBox = this.createBox({
-      top: 19, left: 0, width: '40%', height: 8,
+      top: bottomTop, left: 0, width: '40%', bottom: 1,
       tags: true,
       border: { type: 'line' },
       label: ' 파티 ',
@@ -104,7 +106,7 @@ export class DungeonScreen extends BaseScreen {
 
     // Exploration log
     this.logBox = this.createBox({
-      top: 19, left: '40%', width: '60%', height: 8,
+      top: bottomTop, left: '40%', width: '60%', bottom: 1,
       tags: true,
       border: { type: 'line' },
       label: ' 기록 ',
@@ -1206,6 +1208,12 @@ export class DungeonScreen extends BaseScreen {
 
   private refreshDisplay(): void {
     if (this.destroyed) return;
+    // 맵 높이를 모드에 따라 동적 조절
+    const mapHeight = this.fpsMode ? 16 : 22;
+    const bottomTop = 3 + mapHeight;
+    this.mapBox.height = mapHeight;
+    this.partyBox.top = bottomTop;
+    this.logBox.top = bottomTop;
     this.updateHeader();
     this.renderMap();
     this.updatePartyStatus();
