@@ -12,12 +12,14 @@ export interface SpecialMarker {
   column: number;
   tileType: TileType;
   dist: number;
+  tileX: number;
+  tileY: number;
 }
 
 export function castRays(
   tiles: Tile[][], width: number, height: number,
   px: number, py: number, angle: number,
-  columns: number, fov: number = Math.PI / 2.5, maxDist: number = 16,
+  columns: number, fov: number = Math.PI / 2, maxDist: number = 16,
 ): RayHit[] {
   const hits: RayHit[] = [];
   const originX = px + 0.5;
@@ -41,7 +43,7 @@ export function castRays(
 export function findSpecialTiles(
   tiles: Tile[][], width: number, height: number,
   px: number, py: number, angle: number,
-  columns: number, fov: number = Math.PI / 2.5, maxDist: number = 16,
+  columns: number, fov: number = Math.PI / 2, maxDist: number = 16,
 ): SpecialMarker[] {
   const markers: SpecialMarker[] = [];
   const originX = px + 0.5;
@@ -51,7 +53,7 @@ export function findSpecialTiles(
     const rayAngle = angle - fov / 2 + (i / columns) * fov;
     const specials = scanSpecialTiles(tiles, width, height, originX, originY, rayAngle, maxDist, angle);
     for (const s of specials) {
-      markers.push({ column: i, tileType: s.tileType, dist: s.dist });
+      markers.push({ column: i, tileType: s.tileType, dist: s.dist, tileX: s.tileX, tileY: s.tileY });
     }
   }
 
@@ -123,8 +125,8 @@ function castSingleRay(
 function scanSpecialTiles(
   tiles: Tile[][], width: number, height: number,
   ox: number, oy: number, angle: number, maxDist: number, playerAngle: number,
-): { tileType: TileType; dist: number }[] {
-  const result: { tileType: TileType; dist: number }[] = [];
+): { tileType: TileType; dist: number; tileX: number; tileY: number }[] {
+  const result: { tileType: TileType; dist: number; tileX: number; tileY: number }[] = [];
   const dirX = Math.cos(angle);
   const dirY = Math.sin(angle);
 
@@ -170,7 +172,7 @@ function scanSpecialTiles(
     const specialTypes: TileType[] = ['exit', 'combat', 'treasure', 'boss', 'trap', 'curio'];
     if (specialTypes.includes(tile.type) && tile.visible && !tile.cleared) {
       const corrDist = dist * Math.cos(angle - playerAngle);
-      result.push({ tileType: tile.type, dist: corrDist < 0.1 ? 0.1 : corrDist });
+      result.push({ tileType: tile.type, dist: corrDist < 0.1 ? 0.1 : corrDist, tileX: mapX, tileY: mapY });
     }
   }
 

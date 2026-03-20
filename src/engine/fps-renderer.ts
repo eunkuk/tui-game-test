@@ -84,24 +84,32 @@ export function renderFPS(
   const pal = getWallPalette(tc);
   const lines: string[] = [];
 
-  // 특수 마커를 컬럼별로 인덱싱 (가장 가까운 것만)
+  // 특수 마커를 타일 좌표 기준으로 그룹핑 → 중앙 컬럼만 표시
   const specialByCol = new Map<number, SpecialMarker>();
+  const tileGroups = new Map<string, { cols: number[]; marker: SpecialMarker }>();
   for (const s of specials) {
-    const existing = specialByCol.get(s.column);
-    if (!existing || s.dist < existing.dist) {
-      specialByCol.set(s.column, s);
+    const key = `${s.tileX},${s.tileY}`;
+    const group = tileGroups.get(key);
+    if (group) {
+      group.cols.push(s.column);
+      if (s.dist < group.marker.dist) group.marker = s;
+    } else {
+      tileGroups.set(key, { cols: [s.column], marker: s });
     }
   }
+  for (const group of tileGroups.values()) {
+    group.cols.sort((a, b) => a - b);
+    const midCol = group.cols[Math.floor(group.cols.length / 2)]!;
+    specialByCol.set(midCol, group.marker);
+  }
 
-  // 천장 그래디언트 색상 (꼭대기 → 벽 경계)
-  // top: #1a1a3e → bottom: #5a6a9a (더 밝게)
-  const ceilTopR = 0x1a, ceilTopG = 0x1a, ceilTopB = 0x3e;
-  const ceilBotR = 0x5a, ceilBotG = 0x6a, ceilBotB = 0x9a;
+  // 천장 그래디언트 색상 — 훨씬 어둡게 (벽과 확실히 구분)
+  const ceilTopR = 0x08, ceilTopG = 0x08, ceilTopB = 0x18;
+  const ceilBotR = 0x20, ceilBotG = 0x28, ceilBotB = 0x48;
 
-  // 바닥 그래디언트 색상 (벽 경계 → 맨 아래)
-  // top: #6a5a40 → bottom: #cc bb88 (훨씬 밝게)
-  const floorTopR = 0x6a, floorTopG = 0x5a, floorTopB = 0x40;
-  const floorBotR = 0xcc, floorBotG = 0xbb, floorBotB = 0x88;
+  // 바닥 그래디언트 색상 — 훨씬 밝게 (벽과 확실히 구분)
+  const floorTopR = 0x8a, floorTopG = 0x7a, floorTopB = 0x50;
+  const floorBotR = 0xdd, floorBotG = 0xcc, floorBotB = 0x99;
 
   for (let row = 0; row < viewHeight; row++) {
     let line = '';
@@ -114,11 +122,11 @@ export function renderFPS(
       const wallBot = wallTop + wallH;
 
       if (row < wallTop) {
-        // 천장
+        // 천장: ▀ 문자로 벽과 시각적 구분
         const maxCeil = Math.max(wallTop, 1);
         const t = row / maxCeil;
         const c = lerpColor(ceilTopR, ceilTopG, ceilTopB, ceilBotR, ceilBotG, ceilBotB, t);
-        line += `{${c}-fg}\u2588{/${c}-fg}`;
+        line += `{${c}-fg}\u2580{/${c}-fg}`;
       } else if (row >= wallBot) {
         // 바닥 (체크보드 패턴)
         const floorRows = viewHeight - wallBot;
@@ -134,7 +142,7 @@ export function renderFPS(
           fR *= 0.85; fG *= 0.85; fB *= 0.85;
         }
         const c = rgb(fR, fG, fB);
-        line += `{${c}-fg}\u2588{/${c}-fg}`;
+        line += `{${c}-fg}\u2584{/${c}-fg}`;
       } else {
         // 벽
         const wallMid = Math.floor((wallTop + wallBot) / 2);
@@ -143,7 +151,15 @@ export function renderFPS(
           line += getSpecialIcon(special.tileType);
         } else {
           const c = getWallColor(hit.dist, hit.side, pal);
-          line += `{${c}-fg}\u2588{/${c}-fg}`;
+          let wallChar: string;
+          if (hit.side === 1) {
+            // EW면: ▒ 계열로 입체감
+            wallChar = hit.dist < 3 ? '\u2593' : hit.dist < 8 ? '\u2592' : '\u2591';
+          } else {
+            // NS면: █ 계열
+            wallChar = hit.dist < 3 ? '\u2588' : hit.dist < 8 ? '\u2593' : '\u2591';
+          }
+          line += `{${c}-fg}${wallChar}{/${c}-fg}`;
         }
       }
     }
