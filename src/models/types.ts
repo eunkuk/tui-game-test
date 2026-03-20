@@ -103,6 +103,8 @@ export interface Hero {
   rarity: HeroRarity;
   isMainCharacter: boolean;
   statPoints: number;
+  exp: number;
+  expToLevel: number;
 }
 
 // === Monsters ===

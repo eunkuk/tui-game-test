@@ -46,3 +46,30 @@ export function truncate(text: string, maxLen: number): string {
 export function percentChance(percent: number): boolean {
   return RNG.getUniform() * 100 < percent;
 }
+
+const STAT_KOREAN: Record<string, string> = {
+  attack: '공', defense: '방', speed: '속', accuracy: '명',
+  dodge: '회', crit: '치', maxHp: 'HP',
+};
+
+export function formatEquipComparison(newItem: { modifiers: { stat: string; value: number }[] }, equippedItem: { modifiers: { stat: string; value: number }[] } | undefined): string {
+  const newMods: Record<string, number> = {};
+  const oldMods: Record<string, number> = {};
+  for (const m of newItem.modifiers) newMods[m.stat] = (newMods[m.stat] || 0) + m.value;
+  if (equippedItem) {
+    for (const m of equippedItem.modifiers) oldMods[m.stat] = (oldMods[m.stat] || 0) + m.value;
+  }
+  const allStats = new Set([...Object.keys(newMods), ...Object.keys(oldMods)]);
+  const parts: string[] = [];
+  for (const stat of allStats) {
+    const diff = (newMods[stat] || 0) - (oldMods[stat] || 0);
+    if (diff === 0) continue;
+    const label = STAT_KOREAN[stat] || stat;
+    if (diff > 0) {
+      parts.push(`{green-fg}${label}↑${diff}{/green-fg}`);
+    } else {
+      parts.push(`{red-fg}${label}↓${Math.abs(diff)}{/red-fg}`);
+    }
+  }
+  return parts.join(' ');
+}

@@ -153,6 +153,8 @@ export function createHero(heroClass: HeroClass, rarity?: HeroRarity): Hero {
     deathsDoorResist: 67,
     isMainCharacter: false,
     statPoints: 0,
+    exp: 0,
+    expToLevel: 100,
   };
 }
 
@@ -188,6 +190,8 @@ export function createMainCharacter(mainClass: MainCharClass): Hero {
     deathsDoorResist: 67,
     isMainCharacter: true,
     statPoints: 0,
+    exp: 0,
+    expToLevel: 100,
   };
 }
 
@@ -227,6 +231,8 @@ export function levelUpHero(hero: Hero): Hero {
         hp: hero.stats.maxHp, // heal to full
         stress: 0,
       },
+      exp: 0,
+      expToLevel: (newLevel + 1) * 100,
     };
   }
 
@@ -245,6 +251,8 @@ export function levelUpHero(hero: Hero): Hero {
       dodge: hero.stats.dodge + 1,
       stress: 0,
     },
+    exp: 0,
+    expToLevel: (newLevel + 1) * 100,
   };
 }
 

@@ -74,7 +74,7 @@ export class PartySelectScreen extends BaseScreen {
     // Status/hint bar
     this.createBox({
       bottom: 0, left: 0, width: '100%', height: 3,
-      content: '{gray-fg}←→: 패널 전환  ↑↓: 선택  Enter: 추가/제거  S: 위치 교환  Esc: 마을로{/gray-fg}',
+      content: '{gray-fg}←→: 패널 전환  ↑↓: 선택  Enter: 추가/제거  S: 위치 교환  1-4: 위치 교환  Esc: 마을로{/gray-fg}',
       tags: true,
       border: { type: 'line' },
       style: { fg: 'gray', bg: 'black', border: { fg: 'gray' } },
@@ -144,7 +144,9 @@ export class PartySelectScreen extends BaseScreen {
     }
     content += `\n`;
     content += `HP  {${hpColor}-fg}${hpBar}{/${hpColor}-fg}\n    ${hero.stats.hp}/${hero.stats.maxHp}\n`;
-    content += `ST  {${stressColor}-fg}${stressBar}{/${stressColor}-fg}\n    ${hero.stats.stress}/100\n\n`;
+    content += `ST  {${stressColor}-fg}${stressBar}{/${stressColor}-fg}\n    ${hero.stats.stress}/100\n`;
+    const expBar = formatBar(hero.exp, hero.expToLevel, 12);
+    content += `EXP {cyan-fg}${expBar}{/cyan-fg}\n    ${hero.exp}/${hero.expToLevel}\n\n`;
     content += `{white-fg}공격:{/white-fg} ${hero.stats.attack}\n`;
     content += `{white-fg}방어:{/white-fg} ${hero.stats.defense}\n`;
     content += `{white-fg}속도:{/white-fg} ${hero.stats.speed}\n`;
@@ -244,6 +246,16 @@ export class PartySelectScreen extends BaseScreen {
     this.partyList.on('select item', (_el: any, index: number) => {
       const state = this.store.getState();
       this.showHeroStats(state.party[index] || null);
+    });
+
+    // Quick swap with number keys 1-4
+    this.screen.key(['1', '2', '3', '4'], (ch: string) => {
+      if (this.focusedPanel !== 'party') return;
+      const targetPos = parseInt(ch) - 1;
+      const currentPos = (this.partyList as any).selected as number;
+      if (targetPos === currentPos) return;
+      this.store.dispatch({ type: 'SWAP_PARTY_POSITION', pos1: currentPos, pos2: targetPos });
+      this.updateLists();
     });
 
     // Swap mode

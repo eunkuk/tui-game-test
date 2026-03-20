@@ -2,6 +2,7 @@ import blessed from 'blessed';
 import { BaseScreen } from './BaseScreen.ts';
 import type { Item, Hero } from '../models/types.ts';
 import { getClassName } from '../data/heroes.ts';
+import { formatEquipComparison } from '../utils/helpers.ts';
 
 export class InventoryScreen extends BaseScreen {
   private itemList!: blessed.Widgets.ListElement;
@@ -204,9 +205,18 @@ export class InventoryScreen extends BaseScreen {
     const heroLabels = heroes.map(h => {
       let extra = '';
       if (action === 'equip') {
-        const slot = item.type === 'weapon' ? 'weapon' : item.type === 'armor' ? 'armor' : 'trinket1';
-        const equipped = h.equipment[slot];
-        extra = equipped ? ` (현재: ${equipped.name})` : ' (빈 슬롯)';
+        let equipped: Item | undefined;
+        if (item.type === 'weapon') equipped = h.equipment.weapon;
+        else if (item.type === 'armor') equipped = h.equipment.armor;
+        else if (item.type === 'trinket') {
+          if (!h.equipment.trinket1) equipped = undefined;
+          else if (!h.equipment.trinket2) equipped = undefined;
+          else equipped = h.equipment.trinket1;
+        }
+        const currentStr = equipped ? equipped.name : '빈 슬롯';
+        const comparison = formatEquipComparison(item, equipped);
+        const compStr = comparison ? ` ${comparison}` : '';
+        extra = ` ${currentStr} → ${item.name}${compStr}`;
       } else {
         extra = ` HP ${h.stats.hp}/${h.stats.maxHp} ST ${h.stats.stress}`;
       }
@@ -214,7 +224,7 @@ export class InventoryScreen extends BaseScreen {
     });
 
     this.heroSelectList = blessed.list({
-      top: 'center', left: 'center', width: 50, height: Math.min(heroLabels.length + 2, 12),
+      top: 'center', left: 'center', width: 64, height: Math.min(heroLabels.length + 2, 12),
       label: action === 'use' ? ' 대상 선택 ' : ' 장착 대상 선택 ',
       items: heroLabels,
       keys: true, vi: false, mouse: true, tags: true,

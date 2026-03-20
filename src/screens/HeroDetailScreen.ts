@@ -82,11 +82,10 @@ export class HeroDetailScreen extends BaseScreen {
 
     // Bottom: Actions
     const maxLevel = hero.isMainCharacter ? 10 : 5;
-    const levelUpCost = (hero.level + 1) * 300;
-    const canLevelUp = hero.level < maxLevel && state.gold >= levelUpCost;
+    const canLevelUp = hero.level < maxLevel && hero.exp >= hero.expToLevel;
     const levelUpLabel = hero.level >= maxLevel
       ? '레벨업 (최대 레벨)'
-      : `레벨업 (${levelUpCost}G)${canLevelUp ? '' : ' - 골드 부족'}`;
+      : canLevelUp ? '레벨업 (경험치 충족!)' : `레벨업 (EXP ${hero.exp}/${hero.expToLevel})`;
 
     const actionItems = [
       levelUpLabel,
@@ -153,7 +152,12 @@ export class HeroDetailScreen extends BaseScreen {
     content += `{bold}HP{/bold}  {${hpColor}-fg}${hpBar}{/${hpColor}-fg}\n`;
     content += `     ${hero.stats.hp} / ${hero.stats.maxHp}\n`;
     content += `{bold}ST{/bold}  {${stressColor}-fg}${stressBar}{/${stressColor}-fg}\n`;
-    content += `     ${hero.stats.stress} / 100\n\n`;
+    content += `     ${hero.stats.stress} / 100\n`;
+    const expBar = formatBar(hero.exp, hero.expToLevel, 14);
+    const canLvUp = hero.exp >= hero.expToLevel && hero.level < maxLevel;
+    const expLabel = canLvUp ? ' {green-fg}[레벨업 가능!]{/green-fg}' : '';
+    content += `{bold}EXP{/bold} {cyan-fg}${expBar}{/cyan-fg}\n`;
+    content += `     ${hero.exp} / ${hero.expToLevel}${expLabel}\n\n`;
     content += `{white-fg}공격력:{/white-fg}  ${hero.stats.attack}\n`;
     content += `{white-fg}방어력:{/white-fg}  ${hero.stats.defense}\n`;
     content += `{white-fg}속  도:{/white-fg}  ${hero.stats.speed}\n`;
@@ -213,8 +217,7 @@ export class HeroDetailScreen extends BaseScreen {
       case 0: { // Level up
         const maxLevel = hero.isMainCharacter ? 10 : 5;
         if (hero.level >= maxLevel) return;
-        const cost = (hero.level + 1) * 300;
-        if (state.gold < cost) return;
+        if (hero.exp < hero.expToLevel) return;
         this.store.dispatch({ type: 'LEVEL_UP_HERO', heroId: hero.id });
         // Re-render to show updated stats
         this.destroy();

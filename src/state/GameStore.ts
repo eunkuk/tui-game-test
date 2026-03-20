@@ -439,6 +439,27 @@ function gameReducer(state: GameState, action: GameAction): GameState {
           }
         }
       }
+      // Grant EXP to surviving heroes and auto level-up
+      const monsterCount = state.combat.monsters.length;
+      const hasBossMonster = state.combat.monsters.some(m => m.isBoss);
+      const floor = state.tower.currentFloor;
+      const baseExp = floor * 10 + monsterCount * 15;
+      const totalExp = hasBossMonster ? baseExp * 3 : baseExp;
+      const levelUpLogs: string[] = [];
+
+      for (let i = 0; i < updatedParty.length; i++) {
+        let h = updatedParty[i];
+        if (!h || h.stats.hp <= 0) continue;
+        h = { ...h, exp: h.exp + totalExp };
+        // 자동 레벨업 (연속 레벨업 가능)
+        const maxLevel = h.isMainCharacter ? 10 : 5;
+        while (h.exp >= h.expToLevel && h.level < maxLevel) {
+          h = levelUpHero(h);
+          levelUpLogs.push(`${h.name}이(가) 레벨 ${h.level}로 성장!`);
+        }
+        updatedParty[i] = h;
+      }
+
       // Remove dead non-main heroes from party and roster
       let newRoster = [...state.roster];
       for (let i = 0; i < updatedParty.length; i++) {
@@ -461,8 +482,10 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       }
       combatFloorMap.tiles = combatTiles;
 
-      // Update roster with combat versions
+      // Update roster with party versions (includes EXP/level-up), fallback to combat versions
       newRoster = newRoster.map(rh => {
+        const partyVersion = updatedParty.find(ph => ph?.id === rh.id);
+        if (partyVersion) return { ...partyVersion };
         const combatVersion = state.combat!.heroes.find(ch => ch.id === rh.id);
         return combatVersion ? { ...combatVersion } : rh;
       });
@@ -502,7 +525,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
           gameWon: isGameWon,
           week: state.week + 1,
           screen: 'dungeon',
-          gameLog: [...state.gameLog, `보스 처치! ${totalGold}골드 획득! (보스 보너스 ${bossBonus}G)`],
+          gameLog: [...state.gameLog, `보스 처치! ${totalGold}골드 획득! (보스 보너스 ${bossBonus}G)`, `경험치 +${totalExp}`, ...levelUpLogs],
         };
       }
 
@@ -516,7 +539,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         tower: { ...state.tower, floorMap: combatFloorMap },
         maxFloorReached: newMaxFloor,
         screen: 'dungeon',
-        gameLog: [...state.gameLog, `전투 승리! ${floorGold}골드 획득.`],
+        gameLog: [...state.gameLog, `전투 승리! ${floorGold}골드 획득.`, `경험치 +${totalExp}`, ...levelUpLogs],
       };
     }
 
@@ -642,8 +665,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       if (!hero) return state;
       const maxLevel = hero.isMainCharacter ? 10 : 5;
       if (hero.level >= maxLevel) return state;
-      const cost = (hero.level + 1) * 300;
-      if (state.gold < cost) return state;
+      if (hero.exp < hero.expToLevel) return state;
       const upgraded = levelUpHero(hero);
       const newRoster = state.roster.map(h => h.id === action.heroId ? upgraded : h);
       const newParty = state.party.map(h => h?.id === action.heroId ? upgraded : h);
@@ -651,7 +673,6 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         ...state,
         roster: newRoster,
         party: newParty,
-        gold: state.gold - cost,
         gameLog: [...state.gameLog, `${upgraded.name}이(가) 레벨 ${upgraded.level}로 성장했습니다!`],
       };
     }
@@ -795,6 +816,48 @@ function gameReducer(state: GameState, action: GameAction): GameState {
 
     case 'CLEAR_PENDING_LOOT':
       return { ...state, pendingLoot: null };
+
+    case 'USE_COMBAT_ITEM': {
+      if (!state.combat) return state;
+      const item = state.inventory.find(i => i.id === action.itemId);
+      if (!item || !item.consumable) return state;
+
+      const heroIdx = state.combat.heroes.findIndex(h => h.id === action.heroId);
+      if (heroIdx === -1) return state;
+
+      const newHeroes = [...state.combat.heroes];
+      let hero = { ...newHeroes[heroIdx]!, stats: { ...newHeroes[heroIdx]!.stats }, statusEffects: [...newHeroes[heroIdx]!.statusEffects] };
+      const logs: string[] = [];
+
+      if (item.healAmount) {
+        const actualHeal = Math.min(item.healAmount, hero.stats.maxHp - hero.stats.hp);
+        hero.stats.hp = clamp(hero.stats.hp + item.healAmount, 0, hero.stats.maxHp);
+        if (hero.isDeathsDoor && hero.stats.hp > 0) hero = { ...hero, isDeathsDoor: false };
+        logs.push(`${hero.name}이(가) ${item.name}으로 HP ${actualHeal} 회복!`);
+      }
+      if (item.stressHealAmount) {
+        hero.stats.stress = clamp(hero.stats.stress - item.stressHealAmount, 0, 200);
+        logs.push(`${hero.name}의 스트레스가 ${item.stressHealAmount} 감소!`);
+      }
+      if (item.buffEffect) {
+        const buffStatMap: Record<string, string> = { attack: 'buff_attack', defense: 'buff_defense', speed: 'buff_speed' };
+        const effectType = buffStatMap[item.buffEffect.stat] || `buff_${item.buffEffect.stat}`;
+        hero.statusEffects.push({
+          type: effectType as any,
+          duration: item.buffEffect.duration,
+          value: item.buffEffect.value,
+          source: item.name,
+        });
+        logs.push(`${hero.name}에게 ${item.name} 효과 적용! (${item.buffEffect.stat} +${item.buffEffect.value}, ${item.buffEffect.duration}턴)`);
+      }
+
+      newHeroes[heroIdx] = hero;
+      return {
+        ...state,
+        combat: { ...state.combat, heroes: newHeroes, log: [...state.combat.log, ...logs] },
+        inventory: state.inventory.filter(i => i.id !== action.itemId),
+      };
+    }
 
     default:
       return state;

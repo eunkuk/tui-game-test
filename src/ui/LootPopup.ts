@@ -1,6 +1,7 @@
 import blessed from 'blessed';
 import type { Item, Hero, ItemRarity } from '../models/types.ts';
 import { getClassName } from '../data/heroes.ts';
+import { formatEquipComparison } from '../utils/helpers.ts';
 
 const RARITY_COLORS: Record<ItemRarity, string> = {
   common: 'white',
@@ -128,10 +129,18 @@ export function showLootPopup(
 
     const heroLabels = aliveHeroes.map(h => {
       if (action === 'equip') {
-        const slot = item.type === 'weapon' ? 'weapon' : item.type === 'armor' ? 'armor' : 'trinket1';
-        const equipped = h.equipment[slot];
+        let equipped: Item | undefined;
+        if (item.type === 'weapon') equipped = h.equipment.weapon;
+        else if (item.type === 'armor') equipped = h.equipment.armor;
+        else if (item.type === 'trinket') {
+          if (!h.equipment.trinket1) equipped = undefined;
+          else if (!h.equipment.trinket2) equipped = undefined;
+          else equipped = h.equipment.trinket1;
+        }
         const currentStr = equipped ? equipped.name : '없음';
-        return `${h.name} (${getClassName(h.class)}) 현재: ${currentStr}`;
+        const comparison = formatEquipComparison(item, equipped);
+        const compStr = comparison ? ` ${comparison}` : '';
+        return `${h.name} (${getClassName(h.class)}) ${currentStr} → ${item.name}${compStr}`;
       } else {
         return `${h.name} (${getClassName(h.class)}) HP ${h.stats.hp}/${h.stats.maxHp} ST ${h.stats.stress}`;
       }
@@ -140,7 +149,7 @@ export function showLootPopup(
     heroSelectBox = blessed.list({
       top: 'center',
       left: 'center',
-      width: 52,
+      width: 64,
       height: Math.min(aliveHeroes.length + 2, 10),
       label: action === 'equip' ? ' 장착 대상 ' : ' 사용 대상 ',
       items: heroLabels,

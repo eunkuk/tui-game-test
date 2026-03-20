@@ -43,7 +43,8 @@ export type GameAction =
   | { type: 'MAIN_CHAR_FLEE' }
   | { type: 'SET_PENDING_LOOT'; loot: PendingLoot }
   | { type: 'RESOLVE_LOOT_ITEM'; decision: 'equip' | 'store' | 'use' | 'discard'; heroId?: string }
-  | { type: 'CLEAR_PENDING_LOOT' };
+  | { type: 'CLEAR_PENDING_LOOT' }
+  | { type: 'USE_COMBAT_ITEM'; itemId: string; heroId: string };
 
 // Import GameState at the type level
 import type { GameState } from '../models/types.ts';

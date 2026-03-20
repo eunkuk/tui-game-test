@@ -1,6 +1,6 @@
 import blessed from 'blessed';
 import { BaseScreen } from './BaseScreen.ts';
-import type { Hero, Monster, CombatState } from '../models/types.ts';
+import type { Hero, Monster, CombatState, Item } from '../models/types.ts';
 import { getClassName, getStars } from '../data/heroes.ts';
 import { formatBar, randomInt, clamp } from '../utils/helpers.ts';
 import { applyStress, processAfflictionBehavior } from '../engine/stress-engine.ts';
@@ -127,7 +127,7 @@ export class CombatScreen extends BaseScreen {
     this.hintBox = this.createBox({
       bottom: 0, left: 0, width: '100%', height: 1,
       tags: true,
-      content: '{gray-fg}1/2/3: \uc18d\ub3c4  Space: \uc77c\uc2dc\uc815\uc9c0  Esc: \ud3ec\uae30{/gray-fg}',
+      content: '{gray-fg}1/2/3: \uc18d\ub3c4  Space: \uc77c\uc2dc\uc815\uc9c0  P: \ubb3c\uc57d  Esc: \ud3ec\uae30{/gray-fg}',
       style: { fg: 'gray', bg: 'black' },
     });
 
@@ -308,6 +308,17 @@ export class CombatScreen extends BaseScreen {
     this.screen.key(['escape'], () => {
       if (this.currentPhase === 'victory' || this.currentPhase === 'defeat') return;
       this.showAbandonConfirm();
+    });
+
+    this.screen.key(['p'], () => {
+      if (this.currentPhase === 'victory' || this.currentPhase === 'defeat') return;
+      if (!this.paused) {
+        this.paused = true;
+        this.store.dispatch({ type: 'TOGGLE_PAUSE' });
+        this.updateHeader();
+        this.screen.render();
+      }
+      this.showPotionSelect();
     });
   }
 
@@ -650,8 +661,15 @@ export class CombatScreen extends BaseScreen {
       ? generateBossLoot(floor)
       : generateCombatLoot(floor, torchLevel);
 
+    // Calculate EXP for display
+    const monsterCount = this.combat.monsters.length;
+    const hasBossMonster = this.combat.monsters.some(m => m.isBoss);
+    const baseExp = floor * 10 + monsterCount * 15;
+    const earnedExp = hasBossMonster ? baseExp * 3 : baseExp;
+
     this.combat.log.push(hasBoss ? '{bold}{green-fg}\ubcf4\uc2a4 \ucc98\uce58!{/green-fg}{/bold}' : '{green-fg}\uc804\ud22c \uc2b9\ub9ac!{/green-fg}');
     this.combat.log.push(`{bold}{yellow-fg}\uace8\ub4dc +${loot.gold}{/yellow-fg}{/bold}`);
+    this.combat.log.push(`{bold}{cyan-fg}경험치 +${earnedExp}{/cyan-fg}{/bold}`);
     for (const item of loot.items) {
       this.combat.log.push(`\ud68d\ub4dd: ${item.name}`);
     }
@@ -660,8 +678,8 @@ export class CombatScreen extends BaseScreen {
     const titleText = hasBoss ? '{bold}{yellow-fg}\ubcf4\uc2a4 \ucc98\uce58!{/yellow-fg}{/bold}' : '{bold}{green-fg}\uc804\ud22c \uc2b9\ub9ac!{/green-fg}{/bold}';
     const borderColor = hasBoss ? 'yellow' : 'green';
     const victoryBox = blessed.box({
-      top: 'center', left: 'center', width: 44, height: 10,
-      content: `${titleText}\n\n{bold}{yellow-fg}\uace8\ub4dc +${loot.gold}{/yellow-fg}{/bold}\n\uc544\uc774\ud15c: ${loot.items.map(i => i.name).join(', ') || '\uc5c6\uc74c'}\n\n{gray-fg}\uc790\ub3d9 \uacc4\uc18d...{/gray-fg}`,
+      top: 'center', left: 'center', width: 44, height: 11,
+      content: `${titleText}\n\n{bold}{yellow-fg}\uace8\ub4dc +${loot.gold}{/yellow-fg}{/bold}\n{bold}{cyan-fg}경험치 +${earnedExp}{/cyan-fg}{/bold}\n\uc544\uc774\ud15c: ${loot.items.map(i => i.name).join(', ') || '\uc5c6\uc74c'}\n\n{gray-fg}\uc790\ub3d9 \uacc4\uc18d...{/gray-fg}`,
       tags: true,
       border: { type: 'line' },
       style: { fg: 'white', bg: 'black', border: { fg: borderColor } },
@@ -676,6 +694,114 @@ export class CombatScreen extends BaseScreen {
         this.store.dispatch({ type: 'END_COMBAT_VICTORY', loot: loot.items, gold: loot.gold });
       }
     }, Math.floor(2500 / this.speed));
+  }
+
+  private showPotionSelect(): void {
+    const state = this.store.getState();
+    const potions = state.inventory.filter(i => i.consumable === true);
+
+    if (potions.length === 0) {
+      const msgBox = blessed.box({
+        top: 'center', left: 'center', width: 36, height: 5,
+        content: '{yellow-fg}사용 가능한 물약이 없습니다.{/yellow-fg}\n\n{gray-fg}아무 키나 누르세요{/gray-fg}',
+        tags: true, border: { type: 'line' },
+        style: { fg: 'white', bg: 'black', border: { fg: 'yellow' } },
+        align: 'center',
+      });
+      this.addWidget(msgBox);
+      this.screen.render();
+      (this.screen as any).onceKey([], () => {
+        msgBox.destroy();
+        const idx = this.widgets.indexOf(msgBox);
+        if (idx !== -1) this.widgets.splice(idx, 1);
+        this.screen.render();
+      });
+      return;
+    }
+
+    const potionLabels = potions.map(p => {
+      const effects: string[] = [];
+      if (p.healAmount) effects.push(`HP+${p.healAmount}`);
+      if (p.stressHealAmount) effects.push(`ST-${p.stressHealAmount}`);
+      if (p.buffEffect) effects.push(`${p.buffEffect.stat}+${p.buffEffect.value}`);
+      return `${p.name} (${effects.join(' ')})`;
+    });
+
+    const potionList = blessed.list({
+      top: 'center', left: 'center', width: 44, height: Math.min(potions.length + 2, 12),
+      label: ' 물약 선택 ',
+      items: potionLabels, keys: true, vi: false, mouse: true, tags: true,
+      border: { type: 'line' },
+      style: {
+        fg: 'white', bg: 'black', border: { fg: '#ff88ff' },
+        selected: { fg: 'black', bg: '#ff88ff', bold: true },
+        label: { fg: '#ff88ff' },
+      } as any,
+    });
+    this.addWidget(potionList);
+    potionList.focus();
+    this.screen.render();
+
+    const cleanupPotion = () => {
+      potionList.destroy();
+      const idx = this.widgets.indexOf(potionList as any);
+      if (idx !== -1) this.widgets.splice(idx, 1);
+    };
+
+    potionList.on('select', (_el: any, idx: number) => {
+      if (idx >= potions.length) return;
+      cleanupPotion();
+      this.showPotionTargetSelect(potions[idx]!);
+    });
+
+    potionList.key(['escape'], () => {
+      cleanupPotion();
+      this.screen.render();
+    });
+  }
+
+  private showPotionTargetSelect(item: Item): void {
+    const aliveHeroes = this.combat.heroes.filter(h => h.stats.hp > 0);
+    if (aliveHeroes.length === 0) return;
+
+    const heroLabels = aliveHeroes.map(h =>
+      `${h.name} (${getClassName(h.class)}) HP ${h.stats.hp}/${h.stats.maxHp} ST ${h.stats.stress}`
+    );
+
+    const heroList = blessed.list({
+      top: 'center', left: 'center', width: 50, height: Math.min(aliveHeroes.length + 2, 10),
+      label: ` ${item.name} 사용 대상 `,
+      items: heroLabels, keys: true, vi: false, mouse: true, tags: true,
+      border: { type: 'line' },
+      style: {
+        fg: 'white', bg: 'black', border: { fg: 'cyan' },
+        selected: { fg: 'black', bg: 'cyan', bold: true },
+        label: { fg: 'cyan' },
+      } as any,
+    });
+    this.addWidget(heroList);
+    heroList.focus();
+    this.screen.render();
+
+    const cleanupHero = () => {
+      heroList.destroy();
+      const idx = this.widgets.indexOf(heroList as any);
+      if (idx !== -1) this.widgets.splice(idx, 1);
+    };
+
+    heroList.on('select', (_el: any, idx: number) => {
+      if (idx >= aliveHeroes.length) return;
+      const hero = aliveHeroes[idx]!;
+      this.store.dispatch({ type: 'USE_COMBAT_ITEM', itemId: item.id, heroId: hero.id });
+      this.combat = this.store.getState().combat!;
+      cleanupHero();
+      this.updateDisplay();
+    });
+
+    heroList.key(['escape'], () => {
+      cleanupHero();
+      this.showPotionSelect();
+    });
   }
 
   private handleDefeat(): void {

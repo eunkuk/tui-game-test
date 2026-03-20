@@ -123,6 +123,19 @@ export function loadGame(): GameState | null {
       }
     }
 
+    // Migration: add exp fields to heroes
+    for (const hero of parsed.roster) {
+      if ((hero as any).exp === undefined) (hero as any).exp = 0;
+      if ((hero as any).expToLevel === undefined) (hero as any).expToLevel = (hero.level + 1) * 100;
+    }
+    for (let i = 0; i < parsed.party.length; i++) {
+      const h = parsed.party[i];
+      if (h) {
+        if ((h as any).exp === undefined) (h as any).exp = 0;
+        if ((h as any).expToLevel === undefined) (h as any).expToLevel = (h.level + 1) * 100;
+      }
+    }
+
     return parsed;
   } catch (err) {
     return null;

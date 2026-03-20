@@ -106,6 +106,12 @@ export class TownScreen extends BaseScreen {
       this.handleMenuSelect(index);
     });
 
+    // Inventory shortcut
+    this.screen.key(['i'], () => {
+      if (this.subMenu) return;
+      this.store.dispatch({ type: 'NAVIGATE', screen: 'inventory' });
+    });
+
     this.mainMenu.focus();
     this.screen.render();
   }

@@ -112,9 +112,9 @@ export class DungeonScreen extends BaseScreen {
 
   private updateHint(): void {
     if (this.autoMode) {
-      this.hintBox.setContent('{gray-fg}1/2/3:속도  Space:일시정지  Tab:수동모드  Esc:탈출{/gray-fg}');
+      this.hintBox.setContent('{gray-fg}1/2/3:속도  Space:일시정지  Tab:수동모드  I:인벤  Esc:탈출{/gray-fg}');
     } else {
-      this.hintBox.setContent('{gray-fg}↑↓←→/WASD:이동  Tab:자동모드  Esc:탈출{/gray-fg}');
+      this.hintBox.setContent('{gray-fg}↑↓←→/WASD:이동  Tab:자동모드  I:인벤  Esc:탈출{/gray-fg}');
     }
   }
 
@@ -320,6 +320,12 @@ export class DungeonScreen extends BaseScreen {
           this.autoTimer = null;
         }
       }
+    });
+
+    // Inventory shortcut
+    this.screen.key(['i'], () => {
+      if (this.isModalActive()) return;
+      this.store.dispatch({ type: 'NAVIGATE', screen: 'inventory' });
     });
 
     // Manual movement keys (WASD + arrow keys)
