@@ -1,14 +1,37 @@
 {
-  "name": "tui-game",
+  "name": "tui-labyrinth",
+  "version": "1.0.0",
+  "description": "어둠의 탑 - 터미널 던전 크롤러 TUI 게임",
   "type": "module",
-  "private": true,
+  "bin": {
+    "tui-labyrinth": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "tui",
+    "terminal",
+    "game",
+    "dungeon",
+    "crawler",
+    "roguelike"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eunkuk/tui-game-test.git"
   },
   "devDependencies": {
     "@types/blessed": "^0.1.25",
     "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "^5"
   },
